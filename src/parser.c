@@ -130,7 +130,7 @@ struct soc_tplg_priv *socfw_new(const char *name, int verbose)
 	INIT_LIST_HEAD(&soc_tplg->tlv_list);
 	INIT_LIST_HEAD(&soc_tplg->control_list);
 	INIT_LIST_HEAD(&soc_tplg->widget_list);
-	INIT_LIST_HEAD(&soc_tplg->fe_list);
+	INIT_LIST_HEAD(&soc_tplg->pcm_list);
 	INIT_LIST_HEAD(&soc_tplg->be_list);
 	INIT_LIST_HEAD(&soc_tplg->cc_list);
 	INIT_LIST_HEAD(&soc_tplg->route_list);
@@ -146,7 +146,7 @@ void socfw_free(struct soc_tplg_priv *soc_tplg)
 	free_elem_list(&soc_tplg->tlv_list);
 	free_elem_list(&soc_tplg->control_list);
 	free_elem_list(&soc_tplg->widget_list);
-	free_elem_list(&soc_tplg->fe_list);
+	free_elem_list(&soc_tplg->pcm_list);
 	free_elem_list(&soc_tplg->be_list);
 	free_elem_list(&soc_tplg->cc_list);
 	free_elem_list(&soc_tplg->route_list);
@@ -175,22 +175,22 @@ static soc_tplg_elem_t *lookup_element(struct list_head *base,
 	return NULL;
 }
 
-static soc_tplg_elem_t *lookup_fe_stream(struct list_head *base, const char* id)
+static soc_tplg_elem_t *lookup_pcm_dai_stream(struct list_head *base, const char* id)
 {
 	struct list_head *pos, *npos;
 	soc_tplg_elem_t *elem;
-	struct snd_soc_tplg_pcm_fe *fe;
+	struct snd_soc_tplg_pcm_dai *pcm_dai;
 
 	list_for_each_safe(pos, npos, base) {
 
 		elem = list_entry(pos, soc_tplg_elem_t, list);
-		if (elem->type != SND_SOC_TPLG_FE)
+		if (elem->type != SND_SOC_TPLG_PCM)
 			return NULL;
 
-		fe = elem->fe;
-		//printf("\tfound fe '%s': playback '%s', capture '%s'\n", elem->id, fe->playback_caps.stream_name, fe->capture_caps.stream_name);
-		if (fe && (!strcmp(fe->caps[0].name, id)
-			|| !strcmp(fe->caps[1].name, id)))
+		pcm_dai = elem->pcm;
+		//printf("\tfound pcm_dai '%s': playback '%s', capture '%s'\n", elem->id, pcm_dai->playback_caps.stream_name, pcm_dai->capture_caps.stream_name);
+		if (pcm_dai && (!strcmp(pcm_dai->caps[0].name, id)
+			|| !strcmp(pcm_dai->caps[1].name, id)))
 			return elem;
 	}
 
@@ -475,6 +475,194 @@ static int parse_mixer(snd_config_t *cfg, soc_tplg_elem_t *elem)
 	return 0;
 }
 
+/* Parse a Mixer Control.
+ *
+ * A control section has only one mixer.
+ * No support for private data.
+ *
+ *	Mixer [
+ *		reg  (or reg_left and reg_right)
+ *		shift	(or shift_left and shift_right)
+ *		max
+ *		invert
+ *		get
+ *		put
+ *		tlv_array
+ * 	]
+ */
+static int parse_enum(snd_config_t *cfg, soc_tplg_elem_t *elem)
+{
+	snd_config_iterator_t i, next;
+	snd_config_t *n;
+	int err, idx = 0;
+	const char *key = NULL, *val = NULL;
+	struct snd_soc_tplg_mixer_control *mc;
+
+	tplg_dbg("Control Mixer: %s\n", elem->id);
+	if (snd_config_get_type(cfg) != SND_CONFIG_TYPE_COMPOUND) {
+		tplg_error("error: compound is expected for control mixer definition");
+		return -EINVAL;
+	}
+
+	mc = calloc(1, sizeof(*mc));
+	if (!mc)
+		return -ENOMEM;
+	elem->mixer_ctrl = mc;
+	elem->type = SND_SOC_TPLG_MIXER;
+
+	strncpy(mc->hdr.name, elem->id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
+	mc->hdr.index = SOC_CONTROL_IO_EXT |
+		SOC_CONTROL_ID(1, 1, 0);
+	mc->hdr.access = SNDRV_CTL_ELEM_ACCESS_TLV_READ | SNDRV_CTL_ELEM_ACCESS_READWRITE;
+	/* TODO: mc->hdr.tlv_size, need to get tlv info */
+	mc->priv.length  = 0;
+
+	snd_config_for_each(i, next, cfg) {
+		const char *id;
+		idx ^= 1;
+		n = snd_config_iterator_entry(i);
+		err = snd_config_get_id(n, &id);
+		if (err < 0)
+			continue;
+
+		if (snd_config_get_type(n) != SND_CONFIG_TYPE_STRING) {
+			tplg_error("error: string type is expected for sequence command");
+			return -EINVAL;
+		}
+
+		if (idx == 1) {
+			snd_config_get_string(n, &key);
+			continue;
+		}
+
+		if(snd_config_get_string(n, &val) < 0) {
+			tplg_error("Mixer %s: invalid %s definition\n", elem->id, key);
+			return -EINVAL;
+		}
+		tplg_dbg("\t%s: %s\n",key, val);
+
+		if (strcmp(key, "reg") == 0)
+			mc->reg = mc->rreg = atoi(val);
+		else if (strcmp(key, "reg_left") == 0)
+			mc->reg = atoi(val);
+		else if (strcmp(key, "reg_right") == 0)
+			mc->rreg = atoi(val);
+		else if (strcmp(key, "shift") == 0)
+			mc->shift = mc->rshift = atoi(val);
+		else if (strcmp(key, "shift_left") == 0)
+			mc->shift = atoi(val);
+		else if (strcmp(key, "shift_right") == 0)
+			mc->rshift = atoi(val);
+		else if (strcmp(key, "max") == 0)
+			mc->max = mc->platform_max = atoi(val);
+		else if (strcmp(key, "invert") == 0)
+			mc->invert = atoi(val);
+		else if (strcmp(key, "tlv_array") == 0) {
+			if(val[0]) {
+				err = add_ref(elem, val);
+				if (err < 0)
+					return err;
+			}
+		}
+	}
+
+	return 0;
+}
+
+/* Parse a Mixer Control.
+ *
+ * A control section has only one mixer.
+ * No support for private data.
+ *
+ *	Mixer [
+ *		reg  (or reg_left and reg_right)
+ *		shift	(or shift_left and shift_right)
+ *		max
+ *		invert
+ *		get
+ *		put
+ *		tlv_array
+ * 	]
+ */
+static int parse_bytes(snd_config_t *cfg, soc_tplg_elem_t *elem)
+{
+	snd_config_iterator_t i, next;
+	snd_config_t *n;
+	int err, idx = 0;
+	const char *key = NULL, *val = NULL;
+	struct snd_soc_tplg_mixer_control *mc;
+
+	tplg_dbg("Control Bytes: %s\n", elem->id);
+
+	if (snd_config_get_type(cfg) != SND_CONFIG_TYPE_COMPOUND) {
+		tplg_error("error: compound is expected for control mixer definition");
+		return -EINVAL;
+	}
+
+	mc = calloc(1, sizeof(*mc));
+	if (!mc)
+		return -ENOMEM;
+	elem->mixer_ctrl = mc;
+	elem->type = SND_SOC_TPLG_MIXER;
+
+	strncpy(mc->hdr.name, elem->id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
+	mc->hdr.index = SOC_CONTROL_IO_EXT |
+		SOC_CONTROL_ID(1, 1, 0);
+	mc->hdr.access = SNDRV_CTL_ELEM_ACCESS_TLV_READ | SNDRV_CTL_ELEM_ACCESS_READWRITE;
+	/* TODO: mc->hdr.tlv_size, need to get tlv info */
+	mc->priv.length  = 0;
+
+	snd_config_for_each(i, next, cfg) {
+		const char *id;
+		idx ^= 1;
+		n = snd_config_iterator_entry(i);
+		err = snd_config_get_id(n, &id);
+		if (err < 0)
+			continue;
+
+		if (snd_config_get_type(n) != SND_CONFIG_TYPE_STRING) {
+			tplg_error("error: string type is expected for sequence command");
+			return -EINVAL;
+		}
+
+		if (idx == 1) {
+			snd_config_get_string(n, &key);
+			continue;
+		}
+
+		if(snd_config_get_string(n, &val) < 0) {
+			tplg_error("Mixer %s: invalid %s definition\n", elem->id, key);
+			return -EINVAL;
+		}
+		tplg_dbg("\t%s: %s\n",key, val);
+
+		if (strcmp(key, "reg") == 0)
+			mc->reg = mc->rreg = atoi(val);
+		else if (strcmp(key, "reg_left") == 0)
+			mc->reg = atoi(val);
+		else if (strcmp(key, "reg_right") == 0)
+			mc->rreg = atoi(val);
+		else if (strcmp(key, "shift") == 0)
+			mc->shift = mc->rshift = atoi(val);
+		else if (strcmp(key, "shift_left") == 0)
+			mc->shift = atoi(val);
+		else if (strcmp(key, "shift_right") == 0)
+			mc->rshift = atoi(val);
+		else if (strcmp(key, "max") == 0)
+			mc->max = mc->platform_max = atoi(val);
+		else if (strcmp(key, "invert") == 0)
+			mc->invert = atoi(val);
+		else if (strcmp(key, "tlv_array") == 0) {
+			if(val[0]) {
+				err = add_ref(elem, val);
+				if (err < 0)
+					return err;
+			}
+		}
+	}
+
+	return 0;
+}
 
 /* Parse Controls.
  *
@@ -870,14 +1058,14 @@ static int parse_dapm_graph(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg)
 	return 0;
 }
 
-static int parse_fe_stream(snd_config_t *cfg, struct soc_tplg_elem *elem,
+static int parse_pcm_dai_stream(snd_config_t *cfg, struct soc_tplg_elem *elem,
 	int stream_dir)
 {
 	snd_config_iterator_t i, next;
 	snd_config_t *n;
 	int err, idx = 0;
 	const char *key = NULL, *val = NULL;
-	struct snd_soc_tplg_pcm_fe *fe = elem->fe;
+	struct snd_soc_tplg_pcm_dai *pcm_dai = elem->pcm;
 
 	if (snd_config_get_type(cfg) != SND_CONFIG_TYPE_COMPOUND) {
 		tplg_error("error: compound is expected for stream definition\n");
@@ -903,50 +1091,51 @@ static int parse_fe_stream(snd_config_t *cfg, struct soc_tplg_elem *elem,
 		}
 
 		if(snd_config_get_string(n, &val) < 0) {
-			tplg_error("fe %s: invalid '%s' definition\n", elem->id, key);
+			tplg_error("pcm_dai %s: invalid '%s' definition\n", elem->id, key);
 			return -EINVAL;
 		}
 		//tplg_dbg("\t%s: %s\n",key, val);
 
 		if (strcmp(key, "stream_name") == 0) {
 			if (stream_dir == SNDRV_PCM_STREAM_PLAYBACK)
-				strncpy(fe->caps[0].name, val, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
+				strncpy(pcm_dai->caps[0].name, val, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
 			else
-				strncpy(fe->caps[1].name, val, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
+				strncpy(pcm_dai->caps[1].name, val, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
 		}
 	}
 
 	return 0;
 }
 
-static int parse_fe(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg)
+static int parse_pcm_dai(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg)
 {
 	snd_config_iterator_t i, next;
 	snd_config_t *n;
 	const char *id;
 	int err = 0;
 	struct soc_tplg_elem *elem;
-	struct snd_soc_tplg_pcm_fe *fe;
+	struct snd_soc_tplg_pcm_dai *pcm_dai;
 
 	if (snd_config_get_type(cfg) != SND_CONFIG_TYPE_COMPOUND) {
-		tplg_error("error: compound is expected for fe definition\n");
+		tplg_error("error: compound is expected for pcm_dai definition\n");
 		return -EINVAL;
 	}
 
 	elem = elem_new();
 	if (!elem)
 		return -ENOMEM;
-	list_add_tail(&elem->list, &soc_tplg->fe_list);
+
+	list_add_tail(&elem->list, &soc_tplg->pcm_list);
 	snd_config_get_id(cfg, &id);
 	strncpy(elem->id, id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
 
-	fe = calloc(1, sizeof(*fe));
-	if (!fe)
+	pcm_dai = calloc(1, sizeof(*pcm_dai));
+	if (!pcm_dai)
 		return -ENOMEM;
-	elem->fe = fe;
-	elem->type = SND_SOC_TPLG_FE;
+	elem->pcm = pcm_dai;
+	elem->type = SND_SOC_TPLG_PCM;
 
-	printf("find fe '%s'\n", elem->id);
+	printf("find pcm_dai '%s'\n", elem->id);
 
 	snd_config_for_each(i, next, cfg) {
 		n = snd_config_iterator_entry(i);
@@ -955,7 +1144,8 @@ static int parse_fe(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg)
 		}
 
 		if (strcmp(id, "Playback") == 0) {
-			err = parse_fe_stream(n, elem, SNDRV_PCM_STREAM_PLAYBACK);
+			err = parse_pcm_dai_stream(n, elem,
+				SNDRV_PCM_STREAM_PLAYBACK);
 			if (err < 0) {
 				tplg_error("error: failed to parse FE playback");
 				return err;
@@ -964,7 +1154,8 @@ static int parse_fe(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg)
 		}
 
 		if (strcmp(id, "Capture") == 0) {
-			err = parse_fe_stream(n, elem, SNDRV_PCM_STREAM_CAPTURE);
+			err = parse_pcm_dai_stream(n, elem,
+				SNDRV_PCM_STREAM_CAPTURE);
 			if (err < 0) {
 				tplg_error("error: failed to parse FE capture");
 				return err;
@@ -1024,7 +1215,7 @@ static int parse_plugin_topo(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg)
 		}
 
 		if (strcmp(id, "SectionFe") == 0) {
-			err = parse_compound(soc_tplg, n, parse_fe);
+			err = parse_compound(soc_tplg, n, parse_pcm_dai);
 			if (err < 0)
 				return err;
 			continue;
@@ -1103,7 +1294,7 @@ static int check_routes(struct soc_tplg_priv *soc_tplg)
 		if (strlen(route->sink)
 			&& !lookup_element(&soc_tplg->widget_list, route->sink,
 			SND_SOC_TPLG_DAPM_WIDGET)
-			&& !lookup_fe_stream(&soc_tplg->fe_list, route->sink)) {
+			&& !lookup_pcm_dai_stream(&soc_tplg->pcm_list, route->sink)) {
 			tplg_error("Route: Undefined sink widget/stream '%s'\n",
 				route->sink);
 			return -EINVAL;
@@ -1120,7 +1311,7 @@ static int check_routes(struct soc_tplg_priv *soc_tplg)
 		if (strlen(route->source)
 			&& !lookup_element(&soc_tplg->widget_list, route->source,
 			SND_SOC_TPLG_DAPM_WIDGET)
-			&& !lookup_fe_stream(&soc_tplg->fe_list, route->source)) {
+			&& !lookup_pcm_dai_stream(&soc_tplg->pcm_list, route->source)) {
 			tplg_error("Route: Undefined source widget/stream '%s'\n",
 				route->source);
 			return -EINVAL;

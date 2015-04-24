@@ -64,7 +64,7 @@ struct soc_tplg_priv {
 	struct list_head tlv_list;
 	struct list_head control_list;
 	struct list_head widget_list;
-	struct list_head fe_list;
+	struct list_head pcm_list;
 	struct list_head be_list;
 	struct list_head cc_list;
 	struct list_head route_list;
@@ -82,9 +82,9 @@ struct soc_tplg_elem {
 	struct snd_soc_tplg_enum_control *enum_ctrl;
 	struct snd_soc_tplg_bytes_ext *bytes_ext;
 	struct snd_soc_tplg_dapm_widget *widget;
-	struct snd_soc_tplg_pcm_fe *fe;
-	struct snd_soc_tplg_pcm_be *be;
-	struct snd_soc_tplg_pcm_be *cc;
+	struct snd_soc_tplg_pcm_dai *pcm;
+	struct snd_soc_tplg_pcm_dai *be;
+	struct snd_soc_tplg_pcm_dai *cc;
 	struct snd_soc_tplg_dapm_graph_elem *route;
 
 	/* an element may refer to other elements:
