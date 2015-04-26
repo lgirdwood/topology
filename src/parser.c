@@ -39,6 +39,68 @@
 
 #include "topology.h"
 
+struct map_elem {
+	const char *name;
+	int id;
+};
+
+static const struct map_elem widget_map[] = {
+	{"input", SND_SOC_TPLG_DAPM_INPUT},
+	{"output", SND_SOC_TPLG_DAPM_OUTPUT},
+	{"mux", SND_SOC_TPLG_DAPM_MUX},
+	{"mixer", SND_SOC_TPLG_DAPM_MIXER},
+	{"pga", SND_SOC_TPLG_DAPM_PGA},
+	{"out_drv", SND_SOC_TPLG_DAPM_OUT_DRV},
+	{"adc", SND_SOC_TPLG_DAPM_ADC},
+	{"dac", SND_SOC_TPLG_DAPM_DAC},
+	{"switch", SND_SOC_TPLG_DAPM_SWITCH},
+	{"pre", SND_SOC_TPLG_DAPM_PRE},
+	{"post", SND_SOC_TPLG_DAPM_POST},
+	{"aif_in", SND_SOC_TPLG_DAPM_AIF_IN},
+	{"aif_out", SND_SOC_TPLG_DAPM_AIF_OUT},
+	{"dai_in", SND_SOC_TPLG_DAPM_DAI_IN},
+	{"dai_out", SND_SOC_TPLG_DAPM_DAI_OUT},
+	{"dai_link", SND_SOC_TPLG_DAPM_DAI_LINK},
+};
+
+static const struct map_elem channel_map[] = {
+	{"mono", SNDRV_CHMAP_MONO},	/* mono stream */
+	{"fl", SNDRV_CHMAP_FL},		/* front left */
+	{"fr", SNDRV_CHMAP_FR},		/* front right */
+	{"rl", SNDRV_CHMAP_RL},		/* rear left */
+	{"rr", SNDRV_CHMAP_RR},		/* rear right */
+	{"fc", SNDRV_CHMAP_FC},		/* front center */
+	{"lfe", SNDRV_CHMAP_LFE},	/* LFE */
+	{"sl", SNDRV_CHMAP_SL},		/* side left */
+	{"sr", SNDRV_CHMAP_SR},		/* side right */
+	{"rc", SNDRV_CHMAP_RC},		/* rear center */
+	{"flc", SNDRV_CHMAP_FLC},	/* front left center */
+	{"frc", SNDRV_CHMAP_FRC},	/* front right center */
+	{"rlc", SNDRV_CHMAP_RLC},	/* rear left center */
+	{"rrc", SNDRV_CHMAP_RRC},	/* rear right center */
+	{"flw", SNDRV_CHMAP_FLW},	/* front left wide */
+	{"frw", SNDRV_CHMAP_FRW},	/* front right wide */
+	{"flh", SNDRV_CHMAP_FLH},	/* front left high */
+	{"fch", SNDRV_CHMAP_FCH},	/* front center high */
+	{"frh", SNDRV_CHMAP_FRH},	/* front right high */
+	{"tc", SNDRV_CHMAP_TC},		/* top center */
+	{"tfl", SNDRV_CHMAP_TFL},	/* top front left */
+	{"tfr", SNDRV_CHMAP_TFR},	/* top front right */
+	{"tfc", SNDRV_CHMAP_TFC},	/* top front center */
+	{"trl", SNDRV_CHMAP_TRL},	/* top rear left */
+	{"trr", SNDRV_CHMAP_TRR},	/* top rear right */
+	{"trc", SNDRV_CHMAP_TRC},	/* top rear center */
+	{"tflc", SNDRV_CHMAP_TFLC},	/* top front left center */
+	{"tfrc", SNDRV_CHMAP_TFRC},	/* top front right center */
+	{"tsl", SNDRV_CHMAP_TSL},	/* top side left */
+	{"tsr", SNDRV_CHMAP_TSR},	/* top side right */
+	{"llfe", SNDRV_CHMAP_LLFE},	/* left LFE */
+	{"rlfe", SNDRV_CHMAP_RLFE},	/* right LFE */
+	{"bc", SNDRV_CHMAP_BC},		/* bottom center */
+	{"blc", SNDRV_CHMAP_BLC},	/* bottom left center */
+	{"brc", SNDRV_CHMAP_BRC},	/* bottom right center */
+};
+
 static void tplg_error(const char *fmt, ...)
 {
 	va_list va;
@@ -197,33 +259,28 @@ static soc_tplg_elem_t *lookup_pcm_dai_stream(struct list_head *base, const char
 	return NULL;
 }
 
-// TODO add all widget types using table
-#if 0
-struct widget_map {
-	const char *name;
-	enum snd_soc_dapm_type type;
-};
-
-static const widget_map map[] = {
-	{"AIF_IN", snd_soc_dapm_aif_in},
-	etc....
-};
-#endif
-
-static int get_widget_type(const char* id)
+static int lookup_widget(const char *w)
 {
-	int type = -1;
+	int i;
 
-	if (strcmp(id, "AIF_IN") == 0)
-		type = snd_soc_dapm_aif_in;
+	for (i = 0; i < ARRAY_SIZE(widget_map); i++) {
+		if (strcmp(widget_map[i].name, w) == 0)
+			return widget_map[i].id;
+	}
 
-	else if (strcmp(id, "AIF_OUT") == 0)
-		type = snd_soc_dapm_aif_out;
+	return -EINVAL;
+}
 
-	else if (strcmp(id, "MIXER") == 0)
-		type = snd_soc_dapm_mixer;
+static int lookup_channel(const char *c)
+{
+	int i;
 
-	return type;
+	for (i = 0; i < ARRAY_SIZE(channel_map); i++) {
+		if (strcmp(channel_map[i].name, c) == 0)
+			return channel_map[i].id;
+	}
+
+	return -EINVAL;
 }
 
 /*
@@ -297,7 +354,7 @@ static int parse_tlv_dbscale(struct soc_tplg_priv *soc_tplg ATTRIBUTE_UNUSED,
 
 	elem->tlv = fw_tlv;
 	fw_tlv->numid = SNDRV_CTL_TLVT_DB_SCALE;
-	fw_tlv->length = TLV_DB_SCALE_SIZE;
+	fw_tlv->size = TLV_DB_SCALE_SIZE;
 
 	snd_config_for_each(i, next, cfg) {
 		const char *dbscale = NULL;
@@ -381,18 +438,36 @@ static int parse_tlv(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg)
 	return err;
 }
 
+/* Parse a channel.
+ *
+ * Channel."channel_map.name" {
+ *			reg "0"	(register)
+ *			shift "0" (shift)
+ * }
+ */
+static int parse_channel(snd_config_t *cfg, soc_tplg_elem_t *elem)
+{
+#if 0
+	if (strcmp(key, "reg") == 0)
+		mc->reg = mc->rreg = atoi(val);
+	else if (strcmp(key, "shift") == 0)
+		mc->shift = mc->rshift = atoi(val);
+#endif
+	return 0;
+}
+
+
 /* Parse a Mixer Control.
  *
  * A control section has only one mixer.
  * No support for private data.
  *
  *	Mixer [
- *		reg  (or reg_left and reg_right)
- *		shift	(or shift_left and shift_right)
+ *		Channel."channel" {
+			}
  *		max
  *		invert
- *		get
- *		put
+ *		ops
  *		tlv_array
  * 	]
  */
@@ -421,7 +496,7 @@ static int parse_mixer(snd_config_t *cfg, soc_tplg_elem_t *elem)
 		SOC_CONTROL_ID(1, 1, 0);
 	mc->hdr.access = SNDRV_CTL_ELEM_ACCESS_TLV_READ | SNDRV_CTL_ELEM_ACCESS_READWRITE;
 	/* TODO: mc->hdr.tlv_size, need to get tlv info */
-	mc->priv.length  = 0;
+	mc->priv.size  = 0;
 
 	snd_config_for_each(i, next, cfg) {
 		const char *id;
@@ -441,24 +516,13 @@ static int parse_mixer(snd_config_t *cfg, soc_tplg_elem_t *elem)
 			continue;
 		}
 
-		if(snd_config_get_string(n, &val) < 0) {
+		if (snd_config_get_string(n, &val) < 0) {
 			tplg_error("Mixer %s: invalid %s definition\n", elem->id, key);
 			return -EINVAL;
 		}
 		tplg_dbg("\t%s: %s\n",key, val);
-
-		if (strcmp(key, "reg") == 0)
-			mc->reg = mc->rreg = atoi(val);
-		else if (strcmp(key, "reg_left") == 0)
-			mc->reg = atoi(val);
-		else if (strcmp(key, "reg_right") == 0)
-			mc->rreg = atoi(val);
-		else if (strcmp(key, "shift") == 0)
-			mc->shift = mc->rshift = atoi(val);
-		else if (strcmp(key, "shift_left") == 0)
-			mc->shift = atoi(val);
-		else if (strcmp(key, "shift_right") == 0)
-			mc->rshift = atoi(val);
+#if 0
+		// channel
 		else if (strcmp(key, "max") == 0)
 			mc->max = mc->platform_max = atoi(val);
 		else if (strcmp(key, "invert") == 0)
@@ -470,6 +534,7 @@ static int parse_mixer(snd_config_t *cfg, soc_tplg_elem_t *elem)
 					return err;
 			}
 		}
+#endif
 	}
 
 	return 0;
@@ -515,7 +580,7 @@ static int parse_enum(snd_config_t *cfg, soc_tplg_elem_t *elem)
 		SOC_CONTROL_ID(1, 1, 0);
 	mc->hdr.access = SNDRV_CTL_ELEM_ACCESS_TLV_READ | SNDRV_CTL_ELEM_ACCESS_READWRITE;
 	/* TODO: mc->hdr.tlv_size, need to get tlv info */
-	mc->priv.length  = 0;
+	mc->priv.size  = 0;
 
 	snd_config_for_each(i, next, cfg) {
 		const char *id;
@@ -540,7 +605,7 @@ static int parse_enum(snd_config_t *cfg, soc_tplg_elem_t *elem)
 			return -EINVAL;
 		}
 		tplg_dbg("\t%s: %s\n",key, val);
-
+#if 0
 		if (strcmp(key, "reg") == 0)
 			mc->reg = mc->rreg = atoi(val);
 		else if (strcmp(key, "reg_left") == 0)
@@ -564,6 +629,7 @@ static int parse_enum(snd_config_t *cfg, soc_tplg_elem_t *elem)
 					return err;
 			}
 		}
+#endif
 	}
 
 	return 0;
@@ -610,7 +676,7 @@ static int parse_bytes(snd_config_t *cfg, soc_tplg_elem_t *elem)
 		SOC_CONTROL_ID(1, 1, 0);
 	mc->hdr.access = SNDRV_CTL_ELEM_ACCESS_TLV_READ | SNDRV_CTL_ELEM_ACCESS_READWRITE;
 	/* TODO: mc->hdr.tlv_size, need to get tlv info */
-	mc->priv.length  = 0;
+	mc->priv.size  = 0;
 
 	snd_config_for_each(i, next, cfg) {
 		const char *id;
@@ -635,7 +701,7 @@ static int parse_bytes(snd_config_t *cfg, soc_tplg_elem_t *elem)
 			return -EINVAL;
 		}
 		tplg_dbg("\t%s: %s\n",key, val);
-
+#if 0
 		if (strcmp(key, "reg") == 0)
 			mc->reg = mc->rreg = atoi(val);
 		else if (strcmp(key, "reg_left") == 0)
@@ -659,6 +725,7 @@ static int parse_bytes(snd_config_t *cfg, soc_tplg_elem_t *elem)
 					return err;
 			}
 		}
+#endif
 	}
 
 	return 0;
@@ -773,7 +840,7 @@ static int parse_referenced_mixer(snd_config_t *cfg, soc_tplg_elem_t *elem)
 	mc->hdr.access = SNDRV_CTL_ELEM_ACCESS_TLV_READ |
 		SNDRV_CTL_ELEM_ACCESS_READWRITE;
 	/* TODO: mc->hdr.tlv_size, need to get tlv info */
-	mc->priv.length  = 0;
+	mc->priv.size  = 0;
 
 	snd_config_for_each(i, next, cfg) {
 		const char *id;
@@ -799,6 +866,7 @@ static int parse_referenced_mixer(snd_config_t *cfg, soc_tplg_elem_t *elem)
 		}
 		tplg_dbg("\t%s: %s\n",key, val);
 
+#if 0
 		if (strcmp(key, "reg") == 0)
 			mc->reg = mc->rreg = atoi(val);
 		else if (strcmp(key, "reg_left") == 0)
@@ -822,6 +890,7 @@ static int parse_referenced_mixer(snd_config_t *cfg, soc_tplg_elem_t *elem)
 					return err;
 			}
 		}
+#endif
 	}
 
 	return 0;
@@ -898,7 +967,7 @@ static int parse_widget(snd_config_t *cfg, soc_tplg_elem_t *elem)
 	/* check widget type */
 	snd_config_get_id(cfg, &type);
 	tplg_dbg("Widget %s, type %s\n", elem->id, type);
-	widget_type = get_widget_type (type);
+	widget_type = lookup_widget(type);
 	if (widget_type < 0){
 		tplg_error("Widget '%s': Unsupported widget type %s\n", elem->id, type);
 	}

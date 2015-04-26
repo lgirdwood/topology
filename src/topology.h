@@ -45,6 +45,8 @@ enum {
 
 #define CHUNK_SIZE 	4096
 
+#define ARRAY_SIZE(x) (sizeof(x) / sizeof(x[0]))
+
 struct soc_tplg_priv {
 
 	/* opaque vendor data */
