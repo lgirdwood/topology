@@ -182,7 +182,7 @@ struct soc_tplg_priv *socfw_new(const char *name, int verbose)
 	soc_tplg->verbose = verbose;
 	fd = open(name, O_RDWR | O_CREAT, S_IRWXU | S_IRWXG | S_IRWXO);
 	if (fd < 0) {
-		fprintf(stderr, "failed to open %s err %d\n", name, fd);
+		fprintf(stderr, "failed to open %s err %d\n", name, -errno);
 		free(soc_tplg);
 		return NULL;
 	}
@@ -271,6 +271,7 @@ static int lookup_widget(const char *w)
 	return -EINVAL;
 }
 
+#if 0
 static int lookup_channel(const char *c)
 {
 	int i;
@@ -282,6 +283,7 @@ static int lookup_channel(const char *c)
 
 	return -EINVAL;
 }
+#endif
 
 /*
  * Parse compound
@@ -302,6 +304,8 @@ static int parse_compound(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg,
 		return -EINVAL;
 	}
 
+	tplg_dbg("parsing compound %s\n", id);
+
 	/* parse compound */
 	snd_config_for_each(i, next, cfg) {
 		n = snd_config_iterator_entry(i);
@@ -320,6 +324,94 @@ static int parse_compound(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg,
 	return 0;
 }
 
+/* Parse Private Data.
+ *
+ * Object private data
+ *
+ * SectionData."data name" {
+ * 
+ *		DataFile <filename>
+ *	}
+ */
+static int parse_data(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg)
+{
+	snd_config_iterator_t i, next;
+	snd_config_t *n;
+	const char *id;
+	int err = 0;
+	struct soc_tplg_elem *elem;
+
+	elem = elem_new();
+	if (!elem)
+		return -ENOMEM;
+
+	list_add_tail(&elem->list, &soc_tplg->tlv_list);
+
+	snd_config_get_id(cfg, &id);
+	strncpy(elem->id, id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
+	elem->type = SND_SOC_TPLG_TLV;
+
+	snd_config_for_each(i, next, cfg) {
+
+		n = snd_config_iterator_entry(i);
+		if (snd_config_get_id(n, &id) < 0) {
+			continue;
+		}
+
+		if (strcmp(id, "DataFile") == 0) {
+			// TODO: get thedata
+			continue;
+		}
+	}
+
+	return err;
+}
+
+/* Parse Private Data.
+ *
+ * Object private data
+ *
+ * SectionText."text name" {
+ * 
+ *		Values [
+ *			
+ * 		]
+ *	}
+ */
+static int parse_text(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg)
+{
+	snd_config_iterator_t i, next;
+	snd_config_t *n;
+	const char *id;
+	int err = 0;
+	struct soc_tplg_elem *elem;
+
+	elem = elem_new();
+	if (!elem)
+		return -ENOMEM;
+
+	list_add_tail(&elem->list, &soc_tplg->tlv_list);
+
+	snd_config_get_id(cfg, &id);
+	strncpy(elem->id, id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
+	elem->type = SND_SOC_TPLG_TLV;
+
+	snd_config_for_each(i, next, cfg) {
+
+		n = snd_config_iterator_entry(i);
+		if (snd_config_get_id(n, &id) < 0) {
+			continue;
+		}
+
+		if (strcmp(id, "Values") == 0) {
+			// TODO: get thedata
+			continue;
+		}
+	}
+
+	return err;
+}
+
 // TODO: rework the sizes here so we can parse them
 #define TLV_DB_SCALE_SIZE (sizeof(unsigned int)*3)
 #define MAX_TLV_DB_SCALE_STR_SIZE 256
@@ -330,60 +422,56 @@ static int parse_compound(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg,
  * Parse DBScale describing min, step, mute in DB.
  *
  * DBScale [
- *   "min,step,mute"
+ *		min <int>
+ *		step <int>
+ * 		mute <int>
  * ]
  */
-static int parse_tlv_dbscale(struct soc_tplg_priv *soc_tplg ATTRIBUTE_UNUSED,
-				snd_config_t *cfg,
-				struct soc_tplg_elem *elem)
+static int parse_tlv_dbscale(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg,
+	struct soc_tplg_elem *elem)
 {
 	snd_config_iterator_t i, next;
 	snd_config_t *n;
-	struct snd_soc_tplg_ctl_tlv *fw_tlv;
+	struct snd_soc_tplg_ctl_tlv *tplg_tlv;
+	const char *key = NULL, *value = NULL;
+	int idx = 0;
 
-	tplg_dbg("TLV DBScale: %s\n", elem->id);
+	tplg_dbg(" TLV DBScale: %s\n", elem->id);
 
-	if (snd_config_get_type(cfg) != SND_CONFIG_TYPE_COMPOUND) {
-		tplg_error("error: compound is expected for DBScale definition");
-		return -EINVAL;
-	}
-
-	fw_tlv = calloc(1, sizeof(*fw_tlv) + TLV_DB_SCALE_SIZE);
-	if (!fw_tlv)
+	tplg_tlv = calloc(1, sizeof(*tplg_tlv) + TLV_DB_SCALE_SIZE);
+	if (!tplg_tlv)
 		return -ENOMEM;
 
-	elem->tlv = fw_tlv;
-	fw_tlv->numid = SNDRV_CTL_TLVT_DB_SCALE;
-	fw_tlv->size = TLV_DB_SCALE_SIZE;
+	elem->tlv = tplg_tlv;
+	tplg_tlv->numid = SNDRV_CTL_TLVT_DB_SCALE;
+	tplg_tlv->size = TLV_DB_SCALE_SIZE;
 
 	snd_config_for_each(i, next, cfg) {
-		const char *dbscale = NULL;
-		char dbscale2[MAX_TLV_DB_SCALE_STR_SIZE];
-		char *token;
-		unsigned int tlv[3];
-		int j = 0;
+		idx ^= 1;
 
 		n = snd_config_iterator_entry(i);
-		if (snd_config_get_string(n, &dbscale) < 0) {
+
+		/* get key */
+		if (idx == 1) {
+			snd_config_get_string(n, &key);
 			continue;
 		}
 
-		tplg_dbg("\t%s\n", dbscale);
-		strncpy(dbscale2, dbscale, MAX_TLV_DB_SCALE_STR_SIZE - 1);
-		token = strtok(dbscale2, ",");
+		/* get value */
+		if (snd_config_get_string(n, &value) < 0)
+			continue;
 
-		while (token && j < 3) {
-			tlv[j++] = atoi(token);
-			//tplg_dbg( "token %s, tlv%d: %d\n", token, j, tlv[j-1]);
-			token = strtok(NULL, ",");
-		}
+		tplg_dbg("\t%s = %s\n", key, value);
 
-		if (j < 3) {
-			tplg_error("error: %s: Invalid DBScale definition\n", elem->id);
-			return -1;
-		}
-
-		memcpy(fw_tlv + 1, tlv, TLV_DB_SCALE_SIZE);
+		/* get TLV data */
+		if (strcmp(key, "min") == 0)
+			tplg_tlv->data[0] = atoi(value);
+		else if (strcmp(key, "step") == 0)
+			tplg_tlv->data[1] = atoi(value);
+		else if (strcmp(key, "mute") == 0)
+			tplg_tlv->data[2] = atoi(value);
+		else
+			tplg_error("unknown key %s\n", key);
 	}
 
 	return 0;
@@ -415,11 +503,13 @@ static int parse_tlv(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg)
 		return -ENOMEM;
 
 	list_add_tail(&elem->list, &soc_tplg->tlv_list);
+
 	snd_config_get_id(cfg, &id);
 	strncpy(elem->id, id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
 	elem->type = SND_SOC_TPLG_TLV;
 
 	snd_config_for_each(i, next, cfg) {
+
 		n = snd_config_iterator_entry(i);
 		if (snd_config_get_id(n, &id) < 0) {
 			continue;
@@ -438,6 +528,7 @@ static int parse_tlv(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg)
 	return err;
 }
 
+#if 0
 /* Parse a channel.
  *
  * Channel."channel_map.name" {
@@ -455,7 +546,7 @@ static int parse_channel(snd_config_t *cfg, soc_tplg_elem_t *elem)
 #endif
 	return 0;
 }
-
+#endif
 
 /* Parse a Mixer Control.
  *
@@ -1236,7 +1327,7 @@ static int parse_pcm_dai(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg)
 	return 0;
 }
 
-static int parse_plugin_topo(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg)
+static int tplg_parse_config(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg)
 {
 	snd_config_iterator_t i, next;
 	snd_config_t *n;
@@ -1297,12 +1388,26 @@ static int parse_plugin_topo(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg)
 			continue;
 		}
 
-		tplg_error("uknown master file field %s\n", id);
+		if (strcmp(id, "SectionText") == 0) {
+			err = parse_compound(soc_tplg, n, parse_text);
+			if (err < 0)
+				return err;
+			continue;
+		}
+
+		if (strcmp(id, "SectionData") == 0) {
+			err = parse_compound(soc_tplg, n, parse_data);
+			if (err < 0)
+				return err;
+			continue;
+		}
+
+		tplg_error("uknown section %s\n", id);
 	}
 	return 0;
 }
 
-static int load_plugin_topo(const char *file, snd_config_t **cfg)
+static int tplg_load_config(const char *file, snd_config_t **cfg)
 {
 	FILE *fp;
 	snd_input_t *in;
@@ -1469,7 +1574,7 @@ static int check_widgets(struct soc_tplg_priv *soc_tplg)
 	return 0;
 }
 
-static int check_topo_integrity(struct soc_tplg_priv *soc_tplg)
+static int tplg_check_integ(struct soc_tplg_priv *soc_tplg)
 {
 	int err;
 
@@ -1493,20 +1598,20 @@ int parse_conf(struct soc_tplg_priv *soc_tplg, const char *filename)
 	snd_config_t *cfg;
 	int err = 0;
 
-	err = load_plugin_topo(filename, &cfg);
+	err = tplg_load_config(filename, &cfg);
 	if (err < 0) {
-		tplg_error("Failed to load plugin topology file %s\n",
+		tplg_error("Failed to load topology file %s\n",
 			filename);
 		return err;
 	}
 
-	err = parse_plugin_topo(soc_tplg, cfg);
+	err = tplg_parse_config(soc_tplg, cfg);
 	if (err < 0) {
 		tplg_error("Failed to parse topology\n");
 		goto out;
 	}
 
-	err = check_topo_integrity(soc_tplg);
+	err = tplg_check_integ(soc_tplg);
 	if (err < 0) {
 		tplg_error("Failed to check topology integrity\n");
 		goto out;
@@ -1514,7 +1619,6 @@ int parse_conf(struct soc_tplg_priv *soc_tplg, const char *filename)
 
 out:
 	snd_config_delete(cfg);
-
 	return err;
 }
 
