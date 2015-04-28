@@ -51,14 +51,15 @@ int main(int argc, char *argv[])
 	struct soc_tplg_priv *soc_tplg;
 	int i;
 	
-	if (argc < 4)
+	if (argc < 3)
 		usage(argv[0]);
 
 	soc_tplg = socfw_new(argv[2], 1);
-	if (soc_tplg < 0) {
+	if (soc_tplg == NULL) {
 		fprintf(stderr, "failed to open %s\n", argv[argc - 1]);
 		exit(0);
 	}
+
 
 	for (i = 2 ; i < argc - 1; i++) {
 
