@@ -367,6 +367,52 @@ static int parse_data(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg)
 	return err;
 }
 
+#define MAX_TEXT_STR_SIZE	256
+#define MAX_TEXT_STR_NUM	16
+#define TEXT_SIZE_MAX	(MAX_TEXT_STR_SIZE * MAX_TEXT_STR_NUM)
+
+static int parse_text_values(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg,
+	struct soc_tplg_elem *elem)
+{
+	snd_config_iterator_t i, next;
+	snd_config_t *n;
+	struct snd_soc_tplg_text *tplg_text;
+	const char *value = NULL;
+	int j;
+
+	tplg_dbg(" Text Values: %s\n", elem->id);
+
+	tplg_text = calloc(1, sizeof(*tplg_text) + TEXT_SIZE_MAX);
+	if (!tplg_text)
+		return -ENOMEM;	
+
+	elem->text = tplg_text;
+	tplg_text->size = TEXT_SIZE_MAX;
+	tplg_text->num = 0;
+
+	snd_config_for_each(i, next, cfg) {
+		n = snd_config_iterator_entry(i);
+		j = tplg_text->num;
+
+		if (j == MAX_TEXT_STR_NUM) {
+			tplg_dbg("error: text string number exceeds %d\n", j);
+			return -ENOMEM;
+		}
+
+		/* get value */
+		if (snd_config_get_string(n, &value) < 0)
+			continue;
+		
+		j = j * MAX_TEXT_STR_SIZE;
+		strncpy(&tplg_text->data[j], value, MAX_TEXT_STR_SIZE);
+		tplg_dbg("\t%s\n", &tplg_text->data[j]);
+		
+		tplg_text->num++;
+	}
+
+	return 0;
+}
+
 /* Parse Private Data.
  *
  * Object private data
@@ -394,7 +440,7 @@ static int parse_text(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg)
 
 	snd_config_get_id(cfg, &id);
 	strncpy(elem->id, id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
-	elem->type = SND_SOC_TPLG_TLV;
+	elem->type = SND_SOC_TPLG_TEXT;
 
 	snd_config_for_each(i, next, cfg) {
 
@@ -402,9 +448,13 @@ static int parse_text(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg)
 		if (snd_config_get_id(n, &id) < 0) {
 			continue;
 		}
-
+		
 		if (strcmp(id, "Values") == 0) {
-			// TODO: get thedata
+			err = parse_text_values(soc_tplg, n, elem);
+			if (err < 0) {
+				tplg_error("error: failed to parse text values");
+				return err;
+			}
 			continue;
 		}
 	}
