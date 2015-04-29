@@ -900,6 +900,21 @@ static int parse_bytes(snd_config_t *cfg, soc_tplg_elem_t *elem)
 	return 0;
 }
 
+static int parse_index(snd_config_t *cfg, struct soc_tplg_elem *elem)
+{
+	const char *value = NULL;
+
+	tplg_dbg(" Index: %s\n", elem->id);
+
+	if (snd_config_get_string(cfg, &value) < 0)
+		return -EINVAL;
+
+	elem->index = atoi(value);
+	tplg_dbg("\t%d\n", elem->index);
+
+	return 0;
+}
+
 /* Parse Controls.
  *
  * Each Control is described in new section
@@ -907,6 +922,8 @@ static int parse_bytes(snd_config_t *cfg, soc_tplg_elem_t *elem)
  *
  * SectionControl."control name" {
  * 		Comment "optional comments"
+ *
+ *		Index
  *
  *		Mixer [
  *			...
@@ -943,6 +960,15 @@ static int parse_control(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg)
 
 		if (strcmp(id, "Comment") == 0)
 			continue;
+
+		if (strcmp(id, "Index") == 0) {
+			err = parse_index(n, elem);
+			if (err < 0) {
+				tplg_error("error: failed to parse index\n");
+				return err;
+			}
+			continue;
+		}
 
 		/* mixer control */
 		if (strcmp(id, "Mixer") == 0) {

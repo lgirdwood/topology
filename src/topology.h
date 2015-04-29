@@ -92,6 +92,7 @@ struct soc_tplg_elem {
 	struct snd_soc_tplg_dapm_graph_elem *route;
 	struct snd_soc_tplg_text *text;
 	struct snd_soc_tplg_private *data;
+	int index;
 
 	/* an element may refer to other elements:
 	 * a mixer control may refer to a tlv,
