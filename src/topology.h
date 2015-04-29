@@ -41,7 +41,8 @@
 enum {
 	SND_SOC_TPLG_TLV = (SND_SOC_TPLG_TYPE_MAX + 1),
 	SND_SOC_TPLG_MIXER_ARRAY,
-	SND_SOC_TPLG_TEXT
+	SND_SOC_TPLG_TEXT,
+	SND_SOC_TPLG_DATA
 };
 
 #define CHUNK_SIZE 	4096
@@ -90,6 +91,7 @@ struct soc_tplg_elem {
 	struct snd_soc_tplg_pcm_dai *cc;
 	struct snd_soc_tplg_dapm_graph_elem *route;
 	struct snd_soc_tplg_text *text;
+	struct snd_soc_tplg_private *data;
 
 	/* an element may refer to other elements:
 	 * a mixer control may refer to a tlv,

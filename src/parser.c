@@ -324,6 +324,30 @@ static int parse_compound(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg,
 	return 0;
 }
 
+static int parse_data_file(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg,
+	struct soc_tplg_elem *elem)
+{
+	struct snd_soc_tplg_private *priv;
+	const char *value = NULL;
+
+	tplg_dbg(" Data DataFile: %s\n", elem->id);
+
+	if (snd_config_get_string(cfg, &value) < 0)
+		return -EINVAL;
+
+	priv = calloc(1, sizeof(*priv) + PATH_MAX);
+	if (!priv)
+		return -ENOMEM;	
+	
+	elem->data = priv;
+	priv->size = PATH_MAX;
+
+	strncpy(priv->data, value, PATH_MAX);
+	tplg_dbg("\t%s\n", priv->data);
+
+	return 0;
+}
+
 /* Parse Private Data.
  *
  * Object private data
@@ -349,7 +373,7 @@ static int parse_data(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg)
 
 	snd_config_get_id(cfg, &id);
 	strncpy(elem->id, id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
-	elem->type = SND_SOC_TPLG_TLV;
+	elem->type = SND_SOC_TPLG_DATA;
 
 	snd_config_for_each(i, next, cfg) {
 
@@ -359,7 +383,11 @@ static int parse_data(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg)
 		}
 
 		if (strcmp(id, "DataFile") == 0) {
-			// TODO: get thedata
+			err = parse_data_file(soc_tplg, n, elem);
+			if (err < 0) {
+				tplg_error("error: failed to parse data file");
+				return err;
+			}
 			continue;
 		}
 	}
