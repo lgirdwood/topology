@@ -23,10 +23,13 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <dlfcn.h>
-
-#include "socfw.h"
-
 #include <dirent.h>
+
+#include <linux/types.h>
+#include <sound/asound.h>
+#include <uapi/sound/asoc.h>
+#include <uapi/sound/tlv.h>
+
 #include <alsa/asoundef.h>
 #include <alsa/version.h>
 #include <alsa/global.h>
@@ -37,6 +40,14 @@
 /* TODO: no longer need list.h after integrating it into alsa lib */
 #include "list.h"
 
+/* kernel typedefs */
+typedef	uint32_t u32;
+typedef	int32_t s32;
+typedef	uint16_t u16;
+typedef	int16_t s16;
+typedef	uint8_t u8;
+typedef	int8_t s8;
+
 /* internal topology type not used by kernel */
 enum {
 	SND_SOC_TPLG_TLV = (SND_SOC_TPLG_TYPE_MAX + 1),
@@ -46,7 +57,7 @@ enum {
 };
 
 #define CHUNK_SIZE 	4096
-
+#define TLV_DB_SCALE_SIZE (sizeof(u32) * 3)
 #define ARRAY_SIZE(x) (sizeof(x) / sizeof(x[0]))
 
 struct soc_tplg_priv {
@@ -62,7 +73,9 @@ struct soc_tplg_priv {
 
 	u32 version;
 
+	/* runtime state */
 	u32 next_hdr_pos;
+	int index;
 
 	/* for text format topology */
 	struct list_head tlv_list;
@@ -72,7 +85,6 @@ struct soc_tplg_priv {
 	struct list_head be_list;
 	struct list_head cc_list;
 	struct list_head route_list;
-
 	struct list_head mixer_array_list;
 };
 

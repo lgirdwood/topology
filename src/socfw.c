@@ -29,13 +29,12 @@
 #include <sys/stat.h>
 #include <dlfcn.h>
 
-#include "socfw.h"
+#include "topology.h"
 
 struct soc_tplg_priv;
 
 struct soc_tplg_priv *socfw_new(const char *name, int verbose);
 void socfw_free(struct soc_tplg_priv *soc_tplg);
-int socfw_import_vendor(struct soc_tplg_priv *soc_tplg, const char *name, int type);
 int parse_conf(struct soc_tplg_priv *soc_tplg, const char *filename);
 
 static void usage(char *name)
@@ -49,7 +48,6 @@ static void usage(char *name)
 int main(int argc, char *argv[])
 {
 	struct soc_tplg_priv *soc_tplg;
-	int i;
 	
 	if (argc < 3)
 		usage(argv[0]);
@@ -58,19 +56,6 @@ int main(int argc, char *argv[])
 	if (soc_tplg == NULL) {
 		fprintf(stderr, "failed to open %s\n", argv[argc - 1]);
 		exit(0);
-	}
-
-
-	for (i = 2 ; i < argc - 1; i++) {
-
-		/* vendor options */
-		if (!strcmp("-vfw", argv[i])) {
-			if (++i == argc)
-				usage(argv[0]);
-
-			socfw_import_vendor(soc_tplg, argv[i], SND_SOC_TPLG_VENDOR_FW);
-			continue;
-		}
 	}
 
 	parse_conf(soc_tplg, argv[1]);

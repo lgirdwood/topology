@@ -6,11 +6,11 @@ AM_CFLAGS = \
 
 bin_PROGRAMS = socfw
 
-socfw_SOURCES = socfw.c socfw.h parser.c builder.c topology.h
+socfw_SOURCES = socfw.c parser.c builder.c topology.h
 
 socfw_CFLAGS = $(AM_CFLAGS)
 socfw_LDADD = -lasound
 
 include_HEADERS = \
-	socfw.h
+	topology.h
 

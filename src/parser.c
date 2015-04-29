@@ -13,27 +13,6 @@
 
 */
 
-#include <stdlib.h>
-#include <stdio.h>
-#include <stdarg.h>
-#include <stdint.h>
-#include <fcntl.h>
-#include <unistd.h>
-#include <errno.h>
-#include <string.h>
-#include <sys/stat.h>
-#include <dlfcn.h>
-
-#include "socfw.h"
-
-#include <dirent.h>
-#include <alsa/asoundef.h>
-#include <alsa/version.h>
-#include <alsa/global.h>
-#include <alsa/input.h>
-#include <alsa/output.h>
-#include <alsa/error.h>
-#include <alsa/conf.h>
 /* TODO: no longer need list.h after integrating it into alsa lib */
 #include "list.h"
 
@@ -402,6 +381,7 @@ static int parse_data(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg)
 static int parse_text_values(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg,
 	struct soc_tplg_elem *elem)
 {
+#if 0
 	snd_config_iterator_t i, next;
 	snd_config_t *n;
 	struct snd_soc_tplg_text *tplg_text;
@@ -437,7 +417,7 @@ static int parse_text_values(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg,
 		
 		tplg_text->num++;
 	}
-
+#endif
 	return 0;
 }
 
@@ -490,10 +470,6 @@ static int parse_text(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg)
 	return err;
 }
 
-// TODO: rework the sizes here so we can parse them
-#define TLV_DB_SCALE_SIZE (sizeof(unsigned int)*3)
-#define MAX_TLV_DB_SCALE_STR_SIZE 256
-
 /*
  * Parse TLV of DBScale type.
  *
@@ -512,13 +488,14 @@ static int parse_tlv_dbscale(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg,
 	snd_config_t *n;
 	struct snd_soc_tplg_ctl_tlv *tplg_tlv;
 	const char *key = NULL, *value = NULL;
-	int idx = 0;
+	int idx = 0, *data;
 
 	tplg_dbg(" TLV DBScale: %s\n", elem->id);
 
 	tplg_tlv = calloc(1, sizeof(*tplg_tlv) + TLV_DB_SCALE_SIZE);
 	if (!tplg_tlv)
 		return -ENOMEM;
+	data = (int*)(tplg_tlv + 1);
 
 	elem->tlv = tplg_tlv;
 	tplg_tlv->numid = SNDRV_CTL_TLVT_DB_SCALE;
@@ -543,11 +520,11 @@ static int parse_tlv_dbscale(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg,
 
 		/* get TLV data */
 		if (strcmp(key, "min") == 0)
-			tplg_tlv->data[0] = atoi(value);
+			data[0] = atoi(value);
 		else if (strcmp(key, "step") == 0)
-			tplg_tlv->data[1] = atoi(value);
+			data[1] = atoi(value);
 		else if (strcmp(key, "mute") == 0)
-			tplg_tlv->data[2] = atoi(value);
+			data[2] = atoi(value);
 		else
 			tplg_error("unknown key %s\n", key);
 	}
@@ -561,8 +538,6 @@ static int parse_tlv_dbscale(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg,
  * Supported TLV types: DBScale.
  *
  * SectionTLV."tlv name" {
- * 		Comment "optional comments"
- *
  *		TlvType [
  *
  * 		]
@@ -596,7 +571,7 @@ static int parse_tlv(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg)
 		if (strcmp(id, "DBScale") == 0) {
 			err = parse_tlv_dbscale(soc_tplg, n, elem);
 			if (err < 0) {
-				tplg_error("error: failed to parse verb enable sequence");
+				tplg_error("error: failed to DBScale");
 				return err;
 			}
 			continue;
@@ -614,303 +589,180 @@ static int parse_tlv(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg)
  *			shift "0" (shift)
  * }
  */
-static int parse_channel(snd_config_t *cfg, soc_tplg_elem_t *elem)
+static int parse_channel(snd_config_t *cfg, struct snd_soc_tplg_channel *chan)
 {
-#if 0
+
 	if (strcmp(key, "reg") == 0)
 		mc->reg = mc->rreg = atoi(val);
 	else if (strcmp(key, "shift") == 0)
 		mc->shift = mc->rshift = atoi(val);
-#endif
+
 	return 0;
 }
 #endif
 
-/* Parse a Mixer Control.
+/* Parse Control Bytes
  *
- * A control section has only one mixer.
- * No support for private data.
+ * Each Control is described in new section
+ * Supported control types: Mixer
  *
- *	Mixer [
- *		Channel."channel" {
-			}
- *		max
- *		invert
- *		ops
- *		tlv_array
- * 	]
+ * SectionControlMixer."control name" {
+ * 	Comment "optional comments"
+ *
+ *	Index <int>
+ *		
+ *	Channel."name" [
+ *	]
+ *
+ *	max <int>
+ *	invert <boolean>
+ *	Ops [
+ *	]
+ *
+ *	tlv "hsw_vol_tlv"
+ * }
  */
-static int parse_mixer(snd_config_t *cfg, soc_tplg_elem_t *elem)
+static int parse_control_bytes(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg)
 {
+	struct snd_soc_tplg_mixer_control *mc;
+	struct soc_tplg_elem *elem;
 	snd_config_iterator_t i, next;
 	snd_config_t *n;
-	int err, idx = 0;
-	const char *key = NULL, *val = NULL;
-	struct snd_soc_tplg_mixer_control *mc;
+	const char *id, *val = NULL;	
 
-	tplg_dbg("Control Mixer: %s\n", elem->id);
-	if (snd_config_get_type(cfg) != SND_CONFIG_TYPE_COMPOUND) {
-		tplg_error("error: compound is expected for control mixer definition");
-		return -EINVAL;
-	}
+	elem = elem_new();
+	if (!elem)
+		return -ENOMEM;
 
 	mc = calloc(1, sizeof(*mc));
-	if (!mc)
+	if (!mc) {
+		free(elem);
 		return -ENOMEM;
+	}
+
+	/* add new element to control list */
+	list_add_tail(&elem->list, &soc_tplg->control_list);
+	snd_config_get_id(cfg, &id);
+	strncpy(elem->id, id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
+
+	/* init new mixer */	
 	elem->mixer_ctrl = mc;
 	elem->type = SND_SOC_TPLG_MIXER;
+	strncpy(mc->hdr.name, elem->id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);	
+	mc->hdr.access = SNDRV_CTL_ELEM_ACCESS_TLV_READ |
+		SNDRV_CTL_ELEM_ACCESS_READWRITE;
 
-	strncpy(mc->hdr.name, elem->id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
 	mc->hdr.index = SOC_CONTROL_IO_EXT |
 		SOC_CONTROL_ID(1, 1, 0);
-	mc->hdr.access = SNDRV_CTL_ELEM_ACCESS_TLV_READ | SNDRV_CTL_ELEM_ACCESS_READWRITE;
-	/* TODO: mc->hdr.tlv_size, need to get tlv info */
-	mc->priv.size  = 0;
+	mc->hdr.tlv_size = 0;
+	mc->priv.size = 0;
 
+	/* giterate trough each mixer elment */
 	snd_config_for_each(i, next, cfg) {
-		const char *id;
-		idx ^= 1;
+
 		n = snd_config_iterator_entry(i);
-		err = snd_config_get_id(n, &id);
-		if (err < 0)
+
+		if (snd_config_get_id(n, &id) < 0)
 			continue;
 
-		if (snd_config_get_type(n) != SND_CONFIG_TYPE_STRING) {
-			tplg_error("error: string type is expected for sequence command");
-			return -EINVAL;
-		}
-
-		if (idx == 1) {
-			snd_config_get_string(n, &key);
+		/* skip comments */
+		if (strcmp(id, "Comment") == 0)
 			continue;
-		}
+		if (id[0] == '#')
+			continue;
 
-		if (snd_config_get_string(n, &val) < 0) {
-			tplg_error("Mixer %s: invalid %s definition\n", elem->id, key);
-			return -EINVAL;
-		}
-		tplg_dbg("\t%s: %s\n",key, val);
-#if 0
-		// channel
-		else if (strcmp(key, "max") == 0)
-			mc->max = mc->platform_max = atoi(val);
-		else if (strcmp(key, "invert") == 0)
-			mc->invert = atoi(val);
-		else if (strcmp(key, "tlv_array") == 0) {
-			if(val[0]) {
-				err = add_ref(elem, val);
-				if (err < 0)
-					return err;
-			}
-		}
-#endif
+		/* check here for more compound IDs */
+
+		/* get value */
+		if (snd_config_get_string(n, &val) < 0)
+			continue;
+
+		tplg_dbg("\t%s: %s\n", id, val);
+
 	}
 
 	return 0;
 }
 
-/* Parse a Mixer Control.
+/* Parse Control Enums.
  *
- * A control section has only one mixer.
- * No support for private data.
+ * Each Control is described in new section
+ * Supported control types: Mixer
  *
- *	Mixer [
- *		reg  (or reg_left and reg_right)
- *		shift	(or shift_left and shift_right)
- *		max
- *		invert
- *		get
- *		put
- *		tlv_array
- * 	]
+ * SectionControlMixer."control name" {
+ * 	Comment "optional comments"
+ *
+ *	Index <int>
+ *		
+ *	Channel."name" [
+ *	]
+ *
+ *	max <int>
+ *	invert <boolean>
+ *	Ops [
+ *	]
+ *
+ *	tlv "hsw_vol_tlv"
+ * }
  */
-static int parse_enum(snd_config_t *cfg, soc_tplg_elem_t *elem)
+static int parse_control_enum(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg)
 {
+	struct snd_soc_tplg_mixer_control *mc;
+	struct soc_tplg_elem *elem;
 	snd_config_iterator_t i, next;
 	snd_config_t *n;
-	int err, idx = 0;
-	const char *key = NULL, *val = NULL;
-	struct snd_soc_tplg_mixer_control *mc;
+	const char *id, *val = NULL;	
 
-	tplg_dbg("Control Mixer: %s\n", elem->id);
-	if (snd_config_get_type(cfg) != SND_CONFIG_TYPE_COMPOUND) {
-		tplg_error("error: compound is expected for control mixer definition");
-		return -EINVAL;
-	}
+	elem = elem_new();
+	if (!elem)
+		return -ENOMEM;
 
 	mc = calloc(1, sizeof(*mc));
-	if (!mc)
+	if (!mc) {
+		free(elem);
 		return -ENOMEM;
+	}
+
+	/* add new element to control list */
+	list_add_tail(&elem->list, &soc_tplg->control_list);
+	snd_config_get_id(cfg, &id);
+	strncpy(elem->id, id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
+
+	/* init new mixer */	
 	elem->mixer_ctrl = mc;
 	elem->type = SND_SOC_TPLG_MIXER;
+	strncpy(mc->hdr.name, elem->id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);	
+	mc->hdr.access = SNDRV_CTL_ELEM_ACCESS_TLV_READ |
+		SNDRV_CTL_ELEM_ACCESS_READWRITE;
 
-	strncpy(mc->hdr.name, elem->id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
 	mc->hdr.index = SOC_CONTROL_IO_EXT |
 		SOC_CONTROL_ID(1, 1, 0);
-	mc->hdr.access = SNDRV_CTL_ELEM_ACCESS_TLV_READ | SNDRV_CTL_ELEM_ACCESS_READWRITE;
-	/* TODO: mc->hdr.tlv_size, need to get tlv info */
-	mc->priv.size  = 0;
+	mc->hdr.tlv_size = 0;
+	mc->priv.size = 0;
 
+	/* giterate trough each mixer elment */
 	snd_config_for_each(i, next, cfg) {
-		const char *id;
-		idx ^= 1;
+
 		n = snd_config_iterator_entry(i);
-		err = snd_config_get_id(n, &id);
-		if (err < 0)
+
+		if (snd_config_get_id(n, &id) < 0)
 			continue;
 
-		if (snd_config_get_type(n) != SND_CONFIG_TYPE_STRING) {
-			tplg_error("error: string type is expected for sequence command");
-			return -EINVAL;
-		}
-
-		if (idx == 1) {
-			snd_config_get_string(n, &key);
+		/* skip comments */
+		if (strcmp(id, "Comment") == 0)
 			continue;
-		}
+		if (id[0] == '#')
+			continue;
 
-		if(snd_config_get_string(n, &val) < 0) {
-			tplg_error("Mixer %s: invalid %s definition\n", elem->id, key);
-			return -EINVAL;
-		}
-		tplg_dbg("\t%s: %s\n",key, val);
-#if 0
-		if (strcmp(key, "reg") == 0)
-			mc->reg = mc->rreg = atoi(val);
-		else if (strcmp(key, "reg_left") == 0)
-			mc->reg = atoi(val);
-		else if (strcmp(key, "reg_right") == 0)
-			mc->rreg = atoi(val);
-		else if (strcmp(key, "shift") == 0)
-			mc->shift = mc->rshift = atoi(val);
-		else if (strcmp(key, "shift_left") == 0)
-			mc->shift = atoi(val);
-		else if (strcmp(key, "shift_right") == 0)
-			mc->rshift = atoi(val);
-		else if (strcmp(key, "max") == 0)
-			mc->max = mc->platform_max = atoi(val);
-		else if (strcmp(key, "invert") == 0)
-			mc->invert = atoi(val);
-		else if (strcmp(key, "tlv_array") == 0) {
-			if(val[0]) {
-				err = add_ref(elem, val);
-				if (err < 0)
-					return err;
-			}
-		}
-#endif
+		/* check here for more compound IDs */
+
+		/* get value */
+		if (snd_config_get_string(n, &val) < 0)
+			continue;
+
+		tplg_dbg("\t%s: %s\n", id, val);
+
 	}
-
-	return 0;
-}
-
-/* Parse a Mixer Control.
- *
- * A control section has only one mixer.
- * No support for private data.
- *
- *	Mixer [
- *		reg  (or reg_left and reg_right)
- *		shift	(or shift_left and shift_right)
- *		max
- *		invert
- *		get
- *		put
- *		tlv_array
- * 	]
- */
-static int parse_bytes(snd_config_t *cfg, soc_tplg_elem_t *elem)
-{
-	snd_config_iterator_t i, next;
-	snd_config_t *n;
-	int err, idx = 0;
-	const char *key = NULL, *val = NULL;
-	struct snd_soc_tplg_mixer_control *mc;
-
-	tplg_dbg("Control Bytes: %s\n", elem->id);
-
-	if (snd_config_get_type(cfg) != SND_CONFIG_TYPE_COMPOUND) {
-		tplg_error("error: compound is expected for control mixer definition");
-		return -EINVAL;
-	}
-
-	mc = calloc(1, sizeof(*mc));
-	if (!mc)
-		return -ENOMEM;
-	elem->mixer_ctrl = mc;
-	elem->type = SND_SOC_TPLG_MIXER;
-
-	strncpy(mc->hdr.name, elem->id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
-	mc->hdr.index = SOC_CONTROL_IO_EXT |
-		SOC_CONTROL_ID(1, 1, 0);
-	mc->hdr.access = SNDRV_CTL_ELEM_ACCESS_TLV_READ | SNDRV_CTL_ELEM_ACCESS_READWRITE;
-	/* TODO: mc->hdr.tlv_size, need to get tlv info */
-	mc->priv.size  = 0;
-
-	snd_config_for_each(i, next, cfg) {
-		const char *id;
-		idx ^= 1;
-		n = snd_config_iterator_entry(i);
-		err = snd_config_get_id(n, &id);
-		if (err < 0)
-			continue;
-
-		if (snd_config_get_type(n) != SND_CONFIG_TYPE_STRING) {
-			tplg_error("error: string type is expected for sequence command");
-			return -EINVAL;
-		}
-
-		if (idx == 1) {
-			snd_config_get_string(n, &key);
-			continue;
-		}
-
-		if(snd_config_get_string(n, &val) < 0) {
-			tplg_error("Mixer %s: invalid %s definition\n", elem->id, key);
-			return -EINVAL;
-		}
-		tplg_dbg("\t%s: %s\n",key, val);
-#if 0
-		if (strcmp(key, "reg") == 0)
-			mc->reg = mc->rreg = atoi(val);
-		else if (strcmp(key, "reg_left") == 0)
-			mc->reg = atoi(val);
-		else if (strcmp(key, "reg_right") == 0)
-			mc->rreg = atoi(val);
-		else if (strcmp(key, "shift") == 0)
-			mc->shift = mc->rshift = atoi(val);
-		else if (strcmp(key, "shift_left") == 0)
-			mc->shift = atoi(val);
-		else if (strcmp(key, "shift_right") == 0)
-			mc->rshift = atoi(val);
-		else if (strcmp(key, "max") == 0)
-			mc->max = mc->platform_max = atoi(val);
-		else if (strcmp(key, "invert") == 0)
-			mc->invert = atoi(val);
-		else if (strcmp(key, "tlv_array") == 0) {
-			if(val[0]) {
-				err = add_ref(elem, val);
-				if (err < 0)
-					return err;
-			}
-		}
-#endif
-	}
-
-	return 0;
-}
-
-static int parse_index(snd_config_t *cfg, struct soc_tplg_elem *elem)
-{
-	const char *value = NULL;
-
-	tplg_dbg(" Index: %s\n", elem->id);
-
-	if (snd_config_get_string(cfg, &value) < 0)
-		return -EINVAL;
-
-	elem->index = atoi(value);
-	tplg_dbg("\t%d\n", elem->index);
 
 	return 0;
 }
@@ -920,88 +772,79 @@ static int parse_index(snd_config_t *cfg, struct soc_tplg_elem *elem)
  * Each Control is described in new section
  * Supported control types: Mixer
  *
- * SectionControl."control name" {
- * 		Comment "optional comments"
+ * SectionControlMixer."control name" {
+ * 	Comment "optional comments"
  *
- *		Index
+ *	Index <int>
+ *		
+ *	Channel."name" [
+ *	]
  *
- *		Mixer [
- *			...
- * 		]
- *		Enum [
- *			...
- * 		]
- *		Bytes [
- *			...
- * 		]
- *	}
+ *	max <int>
+ *	invert <boolean>
+ *	Ops [
+ *	]
+ *
+ *	tlv "hsw_vol_tlv"
+ * }
  */
-static int parse_control(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg)
+static int parse_control_mixer(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg)
 {
+	struct snd_soc_tplg_mixer_control *mc;
+	struct soc_tplg_elem *elem;
 	snd_config_iterator_t i, next;
 	snd_config_t *n;
-	const char *id;
-	int err = 0;
-	struct soc_tplg_elem *elem;
+	const char *id, *val = NULL;	
 
 	elem = elem_new();
 	if (!elem)
 		return -ENOMEM;
 
+	mc = calloc(1, sizeof(*mc));
+	if (!mc) {
+		free(elem);
+		return -ENOMEM;
+	}
+
+	/* add new element to control list */
 	list_add_tail(&elem->list, &soc_tplg->control_list);
 	snd_config_get_id(cfg, &id);
 	strncpy(elem->id, id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
 
-	snd_config_for_each(i, next, cfg) {
-		n = snd_config_iterator_entry(i);
-		if (snd_config_get_id(n, &id) < 0) {
-			continue;
-		}
+	/* init new mixer */	
+	elem->mixer_ctrl = mc;
+	elem->type = SND_SOC_TPLG_MIXER;
+	strncpy(mc->hdr.name, elem->id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);	
+	mc->hdr.access = SNDRV_CTL_ELEM_ACCESS_TLV_READ |
+		SNDRV_CTL_ELEM_ACCESS_READWRITE;
 
+	mc->hdr.index = SOC_CONTROL_IO_EXT |
+		SOC_CONTROL_ID(1, 1, 0);
+	mc->hdr.tlv_size = 0;
+	mc->priv.size = 0;
+
+	/* giterate trough each mixer elment */
+	snd_config_for_each(i, next, cfg) {
+
+		n = snd_config_iterator_entry(i);
+
+		if (snd_config_get_id(n, &id) < 0)
+			continue;
+
+		/* skip comments */
 		if (strcmp(id, "Comment") == 0)
 			continue;
-
-		if (strcmp(id, "Index") == 0) {
-			err = parse_index(n, elem);
-			if (err < 0) {
-				tplg_error("error: failed to parse index\n");
-				return err;
-			}
+		if (id[0] == '#')
 			continue;
-		}
 
-		/* mixer control */
-		if (strcmp(id, "Mixer") == 0) {
-			err = parse_mixer(n, elem);
-			if (err < 0) {
-				tplg_error("error: failed to parse mixer\n");
-				return err;
-			}
+		/* check here for more compound IDs */
+
+		/* get value */
+		if (snd_config_get_string(n, &val) < 0)
 			continue;
-		}
 
-		/* enumerated control */
-		if (strcmp(id, "Enum") == 0) {
-			err = parse_enum(n, elem);
-			if (err < 0) {
-				tplg_error("error: failed to parse enum\n");
-				return err;
-			}
-			continue;
-		}
+		tplg_dbg("\t%s: %s\n", id, val);
 
-		/* bytes control */
-		if (strcmp(id, "Bytes") == 0) {
-			err = parse_bytes(n, elem);
-			if (err < 0) {
-				tplg_error("error: failed to parse bytes\n");
-				return err;
-			}
-			continue;
-		}
-
-		tplg_error("error: Control '%s': Unsupported control type '%s'\n",
-			elem->id, id);
 	}
 
 	return 0;
@@ -1457,8 +1300,22 @@ static int tplg_parse_config(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg)
 			continue;
 		}
 
-		if (strcmp(id, "SectionControl") == 0) {
-			err = parse_compound(soc_tplg, n, parse_control);
+		if (strcmp(id, "SectionControlMixer") == 0) {
+			err = parse_compound(soc_tplg, n, parse_control_mixer);
+			if (err < 0)
+				return err;
+			continue;
+		}
+
+		if (strcmp(id, "SectionControlEnum") == 0) {
+			err = parse_compound(soc_tplg, n, parse_control_enum);
+			if (err < 0)
+				return err;
+			continue;
+		}
+
+		if (strcmp(id, "SectionControlBytes") == 0) {
+			err = parse_compound(soc_tplg, n, parse_control_bytes);
 			if (err < 0)
 				return err;
 			continue;
