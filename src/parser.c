@@ -584,27 +584,20 @@ static int parse_tlv(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg)
 /* Parse Control Bytes
  *
  * Each Control is described in new section
- * Supported control types: Mixer
+ * Supported control types: Byte
  *
- * SectionControlMixer."control name" {
+ * SectionControlBytes."control name" {
  * 	Comment "optional comments"
  *
- *	Index <int>
- *		
- *	Channel."name" [
- *	]
- *
- *	max <int>
- *	invert <boolean>
- *	Ops [
- *	]
- *
- *	tlv "hsw_vol_tlv"
+ *	Index "1"
+ *	base "0"
+ *	num_regs "16"
+ *	mask "0xff"
  * }
  */
 static int parse_control_bytes(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg)
 {
-	struct snd_soc_tplg_mixer_control *mc;
+	struct snd_soc_tplg_bytes_ext *be;
 	struct soc_tplg_elem *elem;
 	snd_config_iterator_t i, next;
 	snd_config_t *n;
@@ -614,8 +607,8 @@ static int parse_control_bytes(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg
 	if (!elem)
 		return -ENOMEM;
 
-	mc = calloc(1, sizeof(*mc));
-	if (!mc) {
+	be = calloc(1, sizeof(*be));
+	if (!be) {
 		free(elem);
 		return -ENOMEM;
 	}
@@ -625,23 +618,18 @@ static int parse_control_bytes(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg
 	snd_config_get_id(cfg, &id);
 	strncpy(elem->id, id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
 
-	/* init new mixer */	
-	elem->mixer_ctrl = mc;
-	elem->type = SND_SOC_TPLG_MIXER;
-	strncpy(mc->hdr.name, elem->id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);	
-	mc->hdr.access = SNDRV_CTL_ELEM_ACCESS_TLV_READ |
-		SNDRV_CTL_ELEM_ACCESS_READWRITE;
+	elem->bytes_ext = be;
+	elem->type = SND_SOC_TPLG_BYTES_EXT;
+	strncpy(be->hdr.name, elem->id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
 
-	mc->hdr.index = SOC_CONTROL_IO_EXT |
+	be->hdr.index = SOC_CONTROL_IO_EXT |
 		SOC_CONTROL_ID(1, 1, 0);
-	mc->hdr.tlv_size = 0;
-	mc->priv.size = 0;
+	be->hdr.tlv_size = 0;
+	
+	tplg_dbg(" Control Bytes: %s\n", elem->id);
 
-	/* giterate trough each mixer elment */
 	snd_config_for_each(i, next, cfg) {
-
 		n = snd_config_iterator_entry(i);
-
 		if (snd_config_get_id(n, &id) < 0)
 			continue;
 
@@ -651,14 +639,41 @@ static int parse_control_bytes(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg
 		if (id[0] == '#')
 			continue;
 
-		/* check here for more compound IDs */
+		if (strcmp(id, "Index") == 0) {
+			if (snd_config_get_string(n, &val) < 0)
+				return -EINVAL;
 
-		/* get value */
-		if (snd_config_get_string(n, &val) < 0)
+			be->index = atoi(val);
+			tplg_dbg("\t%s: %d\n", id, be->index);
 			continue;
+		}
 
-		tplg_dbg("\t%s: %s\n", id, val);
+		if (strcmp(id, "base") == 0) {
+			if (snd_config_get_string(n, &val) < 0)
+				return -EINVAL;
 
+			be->base = atoi(val);
+			tplg_dbg("\t%s: %d\n", id, be->base);
+			continue;
+		}
+
+		if (strcmp(id, "num_regs") == 0) {
+			if (snd_config_get_string(n, &val) < 0)
+				return -EINVAL;
+
+			be->num_regs = atoi(val);
+			tplg_dbg("\t%s: %d\n", id, be->num_regs);
+			continue;
+		}
+
+		if (strcmp(id, "mask") == 0) {
+			if (snd_config_get_string(n, &val) < 0)
+				return -EINVAL;
+
+			be->mask = strtol(val, NULL, 16);
+			tplg_dbg("\t%s: %d\n", id, be->mask);
+			continue;
+		}
 	}
 
 	return 0;
