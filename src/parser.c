@@ -581,26 +581,6 @@ static int parse_tlv(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg)
 	return err;
 }
 
-#if 0
-/* Parse a channel.
- *
- * Channel."channel_map.name" {
- *			reg "0"	(register)
- *			shift "0" (shift)
- * }
- */
-static int parse_channel(snd_config_t *cfg, struct snd_soc_tplg_channel *chan)
-{
-
-	if (strcmp(key, "reg") == 0)
-		mc->reg = mc->rreg = atoi(val);
-	else if (strcmp(key, "shift") == 0)
-		mc->shift = mc->rshift = atoi(val);
-
-	return 0;
-}
-#endif
-
 /* Parse Control Bytes
  *
  * Each Control is described in new section
@@ -767,6 +747,78 @@ static int parse_control_enum(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg)
 	return 0;
 }
 
+static void parse_channel_content(snd_config_t *cfg,
+	struct snd_soc_tplg_channel *channel)
+{
+	snd_config_iterator_t i, next;
+	snd_config_t *n;
+	const char *key = NULL, *value = NULL;
+	int idx = 0;
+
+	tplg_dbg("\tChannel: %s\n", channel->name);
+
+	snd_config_for_each(i, next, cfg) {
+		idx ^= 1;
+
+		n = snd_config_iterator_entry(i);
+
+		/* get key */
+		if (idx == 1) {
+			snd_config_get_string(n, &key);
+			continue;
+		}
+
+		/* get value */
+		if (snd_config_get_string(n, &value) < 0)
+			continue;
+
+		if (strcmp(key, "reg") == 0)
+			channel->reg = atoi(value);
+		else if (strcmp(key, "shift") == 0)
+			channel->shift = atoi(value);
+
+		tplg_dbg("\t\t%s = %s\n", key, value);
+	}
+}
+
+/* Parse a channel.
+ *
+ * Channel."channel_map.name" {
+ *			reg "0"	(register)
+ *			shift "0" (shift)
+ * }
+ */
+static int parse_channel(snd_config_t *cfg, struct snd_soc_tplg_channel *channels,
+	int *num_channels, unsigned int num_max)
+{
+	snd_config_iterator_t i, next;
+	snd_config_t *n;
+	const char *id;
+	struct snd_soc_tplg_channel *channel;
+
+	*num_channels = 0;
+
+	snd_config_for_each(i, next, cfg) {
+		if (*num_channels == num_max) {
+			tplg_error("error: channel number exceeds %d\n",
+				SND_SOC_TPLG_MAX_CHAN);
+			return -EINVAL;	
+		}
+
+		channel = &channels[*num_channels];
+		
+		n = snd_config_iterator_entry(i);
+		if (snd_config_get_id(n, &id) < 0)
+			continue;
+
+		strncpy(channel->name, id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
+		parse_channel_content(n, channel);
+		*num_channels += 1;
+	}
+
+	return 0;
+}
+
 /* Parse Controls.
  *
  * Each Control is described in new section
@@ -794,7 +846,8 @@ static int parse_control_mixer(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg
 	struct soc_tplg_elem *elem;
 	snd_config_iterator_t i, next;
 	snd_config_t *n;
-	const char *id, *val = NULL;	
+	const char *id, *val = NULL;
+	int err, num_channels;
 
 	elem = elem_new();
 	if (!elem)
@@ -823,11 +876,11 @@ static int parse_control_mixer(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg
 	mc->hdr.tlv_size = 0;
 	mc->priv.size = 0;
 
+	tplg_dbg(" Control Mixer: %s\n", elem->id);
+
 	/* giterate trough each mixer elment */
 	snd_config_for_each(i, next, cfg) {
-
 		n = snd_config_iterator_entry(i);
-
 		if (snd_config_get_id(n, &id) < 0)
 			continue;
 
@@ -837,14 +890,67 @@ static int parse_control_mixer(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg
 		if (id[0] == '#')
 			continue;
 
-		/* check here for more compound IDs */
+		if (strcmp(id, "Index") == 0) {
+			if (snd_config_get_string(n, &val) < 0)
+				return -EINVAL;
 
-		/* get value */
-		if (snd_config_get_string(n, &val) < 0)
+			mc->index = atoi(val);
+			tplg_dbg("\t%s: %d\n", id, mc->index);
 			continue;
+		}
 
-		tplg_dbg("\t%s: %s\n", id, val);
+		if (strcmp(id, "Channel") == 0) {
+			err = parse_channel(n, mc->channel, &num_channels,
+				SND_SOC_TPLG_MAX_CHAN);
+			if (err < 0)
+				return err;
 
+			mc->num_channels = num_channels;
+			continue;
+		}
+
+		if (strcmp(id, "max") == 0) {
+			if (snd_config_get_string(n, &val) < 0)
+				return -EINVAL;
+
+			mc->max = atoi(val);
+			tplg_dbg("\t%s: %d\n", id, mc->max);
+			continue;
+		}
+
+		if (strcmp(id, "invert") == 0) {
+			if (snd_config_get_string(n, &val) < 0)
+				return -EINVAL;
+
+			if (strcmp(val, "true") == 0)
+				mc->invert = 1;
+			else if (strcmp(val, "false") == 0)
+				mc->invert = 0;
+
+			tplg_dbg("\t%s: %d\n", id, mc->invert);
+			continue;
+		}
+
+		if (strcmp(id, "ops") == 0) {
+			if (snd_config_get_string(n, &val) < 0)
+				return -EINVAL;
+
+			strncpy(mc->ops, val, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
+			tplg_dbg("\t%s: %s\n", id, mc->ops);
+			continue;
+		}
+
+		if (strcmp(id, "tlv_array") == 0) {
+			if (snd_config_get_string(n, &val) < 0)
+				return -EINVAL;
+
+			err = add_ref(elem, val);
+			if (err < 0)
+				return err;				
+
+			tplg_dbg("\t%s: %s\n", id, val);
+			continue;
+		}
 	}
 
 	return 0;
