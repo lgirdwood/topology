@@ -664,6 +664,9 @@ static int parse_control_bytes(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg
 	return 0;
 }
 
+static int parse_channel(snd_config_t *, struct snd_soc_tplg_channel *,
+	int *, unsigned int);
+
 /* Parse Control Enums.
  *
  * Each Control is described in new section
@@ -673,6 +676,7 @@ static int parse_control_bytes(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg
  * 	Comment "optional comments"
  *
  *	Index <int>
+ *	texts "EQU1" 
  *		
  *	Channel."name" [
  *	]
@@ -687,18 +691,19 @@ static int parse_control_bytes(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg
  */
 static int parse_control_enum(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg)
 {
-	struct snd_soc_tplg_mixer_control *mc;
+	struct snd_soc_tplg_enum_control *ec;
 	struct soc_tplg_elem *elem;
 	snd_config_iterator_t i, next;
 	snd_config_t *n;
-	const char *id, *val = NULL;	
+	const char *id, *val = NULL;
+	int err, num_channels;
 
 	elem = elem_new();
 	if (!elem)
 		return -ENOMEM;
 
-	mc = calloc(1, sizeof(*mc));
-	if (!mc) {
+	ec = calloc(1, sizeof(*ec));
+	if (!ec) {
 		free(elem);
 		return -ENOMEM;
 	}
@@ -709,22 +714,21 @@ static int parse_control_enum(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg)
 	strncpy(elem->id, id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
 
 	/* init new mixer */	
-	elem->mixer_ctrl = mc;
-	elem->type = SND_SOC_TPLG_MIXER;
-	strncpy(mc->hdr.name, elem->id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);	
-	mc->hdr.access = SNDRV_CTL_ELEM_ACCESS_TLV_READ |
+	elem->enum_ctrl = ec;
+	elem->type = SND_SOC_TPLG_ENUM;
+	strncpy(ec->hdr.name, elem->id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);	
+	ec->hdr.access = SNDRV_CTL_ELEM_ACCESS_TLV_READ |
 		SNDRV_CTL_ELEM_ACCESS_READWRITE;
 
-	mc->hdr.index = SOC_CONTROL_IO_EXT |
+	ec->hdr.index = SOC_CONTROL_IO_EXT |
 		SOC_CONTROL_ID(1, 1, 0);
-	mc->hdr.tlv_size = 0;
-	mc->priv.size = 0;
+	ec->hdr.tlv_size = 0;
+	ec->priv.size = 0;
 
-	/* giterate trough each mixer elment */
+	tplg_dbg(" Control Enum: %s\n", elem->id);
+
 	snd_config_for_each(i, next, cfg) {
-
 		n = snd_config_iterator_entry(i);
-
 		if (snd_config_get_id(n, &id) < 0)
 			continue;
 
@@ -734,14 +738,51 @@ static int parse_control_enum(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg)
 		if (id[0] == '#')
 			continue;
 
-		/* check here for more compound IDs */
+		if (strcmp(id, "Index") == 0) {
+			if (snd_config_get_string(n, &val) < 0)
+				return -EINVAL;
 
-		/* get value */
-		if (snd_config_get_string(n, &val) < 0)
+			ec->index = atoi(val);
+			tplg_dbg("\t%s: %d\n", id, ec->index);
 			continue;
+		}
 
-		tplg_dbg("\t%s: %s\n", id, val);
+		if (strcmp(id, "texts") == 0) {
+			if (snd_config_get_string(n, &val) < 0)
+				return -EINVAL;
 
+			strncpy(ec->texts, val, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
+			tplg_dbg("\t%s: %s\n", id, ec->texts);
+			continue;
+		}
+		
+		if (strcmp(id, "Channel") == 0) {
+			err = parse_channel(n, ec->channel, &num_channels,
+				SND_SOC_TPLG_MAX_CHAN);
+			if (err < 0)
+				return err;
+			
+			ec->num_channels = num_channels;
+			continue;
+		}
+
+		if (strcmp(id, "ops") == 0) {
+			if (snd_config_get_string(n, &val) < 0)
+				return -EINVAL;
+
+			strncpy(ec->ops, val, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
+			tplg_dbg("\t%s: %s\n", id, ec->ops);
+			continue;
+		}
+
+		if (strcmp(id, "data") == 0) {
+			if (snd_config_get_string(n, &val) < 0)
+				return -EINVAL;
+
+			strncpy(ec->data, val, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
+			tplg_dbg("\t%s: %s\n", id, ec->data);
+			continue;
+		}
 	}
 
 	return 0;
