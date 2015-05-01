@@ -15,7 +15,6 @@
 
 /* TODO: no longer need list.h after integrating it into alsa lib */
 #include "list.h"
-
 #include "topology.h"
 
 struct map_elem {
@@ -78,6 +77,24 @@ static const struct map_elem channel_map[] = {
 	{"bc", SNDRV_CHMAP_BC},		/* bottom center */
 	{"blc", SNDRV_CHMAP_BLC},	/* bottom left center */
 	{"brc", SNDRV_CHMAP_BRC},	/* bottom right center */
+};
+
+static const struct map_elem control_map[] = {
+	{"volsw", SND_SOC_TPLG_CTL_VOLSW},
+	{"volsw_sx", SND_SOC_TPLG_CTL_VOLSW_SX},
+	{"volsw_xr_sx", SND_SOC_TPLG_CTL_VOLSW_XR_SX},
+	{"enum", SND_SOC_TPLG_CTL_ENUM},
+	{"bytes", SND_SOC_TPLG_CTL_BYTES},
+	{"enum_value", SND_SOC_TPLG_CTL_ENUM_VALUE},
+	{"range", SND_SOC_TPLG_CTL_RANGE},
+	{"strobe", SND_SOC_TPLG_CTL_STROBE},
+};
+
+static const struct map_elem widget_control_map[] = {
+	{"volsw", SND_SOC_TPLG_DAPM_CTL_VOLSW},
+	{"enum_double", SND_SOC_TPLG_DAPM_CTL_ENUM_DOUBLE},
+	{"enum_virt", SND_SOC_TPLG_DAPM_CTL_ENUM_VIRT},
+	{"enum_value", SND_SOC_TPLG_DAPM_CTL_ENUM_VALUE},
 };
 
 static void tplg_error(const char *fmt, ...)
@@ -175,7 +192,8 @@ struct soc_tplg_priv *socfw_new(const char *name, int verbose)
 	INIT_LIST_HEAD(&soc_tplg->be_list);
 	INIT_LIST_HEAD(&soc_tplg->cc_list);
 	INIT_LIST_HEAD(&soc_tplg->route_list);
-	INIT_LIST_HEAD(&soc_tplg->mixer_array_list);
+	INIT_LIST_HEAD(&soc_tplg->pdata_list);
+	INIT_LIST_HEAD(&soc_tplg->text_list);
 
 	return soc_tplg;
 }
@@ -191,7 +209,8 @@ void socfw_free(struct soc_tplg_priv *soc_tplg)
 	free_elem_list(&soc_tplg->be_list);
 	free_elem_list(&soc_tplg->cc_list);
 	free_elem_list(&soc_tplg->route_list);
-	free_elem_list(&soc_tplg->mixer_array_list);
+	free_elem_list(&soc_tplg->pdata_list);
+	free_elem_list(&soc_tplg->text_list);
 
 	free(soc_tplg);
 }
@@ -470,6 +489,108 @@ static int parse_text(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg)
 	return err;
 }
 
+static int parse_channel_content(snd_config_t *cfg,
+	struct snd_soc_tplg_channel *channel)
+{
+	snd_config_iterator_t i, next;
+	snd_config_t *n;
+	const char *id = NULL, *value = NULL;
+
+	tplg_dbg("\tChannel: %d\n", channel->id);
+
+	snd_config_for_each(i, next, cfg) {
+
+		n = snd_config_iterator_entry(i);
+
+		/* get ID */
+		if (snd_config_get_id(n, &id) < 0) {
+			tplg_error("cant get ID\n");
+			return -EINVAL;
+		}
+
+		/* get value */
+		if (snd_config_get_string(n, &value) < 0)
+			continue;
+
+		if (strcmp(id, "reg") == 0)
+			channel->reg = atoi(value);
+		else if (strcmp(id, "shift") == 0)
+			channel->shift = atoi(value);
+
+		tplg_dbg("\t\t%s = %s\n", id, value);
+	}
+
+	return 0;
+}
+
+/* Parse a channel.
+ *
+ * Channel."channel_map.name" {
+ *		reg "0"	(register)
+ *		shift "0" (shift)
+ * }
+ */
+static int parse_channel(snd_config_t *cfg,
+	struct snd_soc_tplg_channel *channels)
+{
+	snd_config_iterator_t i, next;
+	snd_config_t *n;
+	const char *id;
+	struct snd_soc_tplg_channel *channel;
+	int num_channels = 0;
+
+	snd_config_for_each(i, next, cfg) {
+		if (num_channels == SND_SOC_TPLG_MAX_CHAN) {
+			tplg_error("error: channel number exceeds %d\n",
+				SND_SOC_TPLG_MAX_CHAN);
+			return -EINVAL;	
+		}
+
+		channel = &channels[num_channels];
+		
+		n = snd_config_iterator_entry(i);
+		if (snd_config_get_id(n, &id) < 0)
+			continue;
+
+		// TODO: lookup channel ID from name using table
+		//strncpy(channel->name, id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
+		parse_channel_content(n, channel);
+		num_channels++;
+	}
+
+	return num_channels;
+}
+
+/* Parse Control operations.
+ *
+ * Ops [
+ *	info <string>
+ *	get <string>
+ *	put <string>
+ *	drv_get <string>
+ *	drv_put <string>
+ * }
+ */
+static int parse_ops(snd_config_t *cfg,
+	struct snd_soc_tplg_ctl_hdr *hdr)
+{
+	snd_config_iterator_t i, next;
+	snd_config_t *n;
+	const char *id;
+
+	snd_config_for_each(i, next, cfg) {
+		
+		n = snd_config_iterator_entry(i);
+		if (snd_config_get_id(n, &id) < 0)
+			continue;
+
+		// TODO: lookup Ops ID from name using table
+		
+	}
+
+	return 0;
+}
+
 /*
  * Parse TLV of DBScale type.
  *
@@ -487,8 +608,8 @@ static int parse_tlv_dbscale(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg,
 	snd_config_iterator_t i, next;
 	snd_config_t *n;
 	struct snd_soc_tplg_ctl_tlv *tplg_tlv;
-	const char *key = NULL, *value = NULL;
-	int idx = 0, *data;
+	const char *id = NULL, *value = NULL;
+	int *data;
 
 	tplg_dbg(" TLV DBScale: %s\n", elem->id);
 
@@ -502,31 +623,30 @@ static int parse_tlv_dbscale(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg,
 	tplg_tlv->size = TLV_DB_SCALE_SIZE;
 
 	snd_config_for_each(i, next, cfg) {
-		idx ^= 1;
 
 		n = snd_config_iterator_entry(i);
 
-		/* get key */
-		if (idx == 1) {
-			snd_config_get_string(n, &key);
-			continue;
+		/* get ID */
+		if (snd_config_get_id(n, &id) < 0) {
+			tplg_error("cant get ID\n");
+			return -EINVAL;
 		}
 
 		/* get value */
 		if (snd_config_get_string(n, &value) < 0)
 			continue;
 
-		tplg_dbg("\t%s = %s\n", key, value);
+		tplg_dbg("\t%s = %s\n", id, value);
 
 		/* get TLV data */
-		if (strcmp(key, "min") == 0)
+		if (strcmp(id, "min") == 0)
 			data[0] = atoi(value);
-		else if (strcmp(key, "step") == 0)
+		else if (strcmp(id, "step") == 0)
 			data[1] = atoi(value);
-		else if (strcmp(key, "mute") == 0)
+		else if (strcmp(id, "mute") == 0)
 			data[2] = atoi(value);
 		else
-			tplg_error("unknown key %s\n", key);
+			tplg_error("unknown key %s\n", id);
 	}
 
 	return 0;
@@ -564,9 +684,8 @@ static int parse_tlv(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg)
 	snd_config_for_each(i, next, cfg) {
 
 		n = snd_config_iterator_entry(i);
-		if (snd_config_get_id(n, &id) < 0) {
+		if (snd_config_get_id(n, &id) < 0)
 			continue;
-		}
 
 		if (strcmp(id, "DBScale") == 0) {
 			err = parse_tlv_dbscale(soc_tplg, n, elem);
@@ -622,9 +741,9 @@ static int parse_control_bytes(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg
 	elem->type = SND_SOC_TPLG_BYTES_EXT;
 	strncpy(be->hdr.name, elem->id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
 
-	be->hdr.index = SOC_CONTROL_IO_EXT |
-		SOC_CONTROL_ID(1, 1, 0);
-	be->hdr.tlv_size = 0;
+	// TODO: get type ops from lookup table based on name
+	//be->hdr.type = SOC_CONTROL_IO_EXT |
+	//	SOC_CONTROL_ID(1, 1, 0);
 	
 	tplg_dbg(" Control Bytes: %s\n", elem->id);
 
@@ -643,12 +762,12 @@ static int parse_control_bytes(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg
 			if (snd_config_get_string(n, &val) < 0)
 				return -EINVAL;
 
-			be->index = atoi(val);
-			tplg_dbg("\t%s: %d\n", id, be->index);
+			be->hdr.index = atoi(val);
+			tplg_dbg("\t%s: %d\n", id, be->hdr.index);
 			continue;
 		}
 
-		if (strcmp(id, "base") == 0) {
+		if (strcmp(id, "Base") == 0) {
 			if (snd_config_get_string(n, &val) < 0)
 				return -EINVAL;
 
@@ -657,7 +776,7 @@ static int parse_control_bytes(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg
 			continue;
 		}
 
-		if (strcmp(id, "num_regs") == 0) {
+		if (strcmp(id, "NumRegs") == 0) {
 			if (snd_config_get_string(n, &val) < 0)
 				return -EINVAL;
 
@@ -666,7 +785,7 @@ static int parse_control_bytes(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg
 			continue;
 		}
 
-		if (strcmp(id, "mask") == 0) {
+		if (strcmp(id, "Mask") == 0) {
 			if (snd_config_get_string(n, &val) < 0)
 				return -EINVAL;
 
@@ -678,9 +797,6 @@ static int parse_control_bytes(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg
 
 	return 0;
 }
-
-static int parse_channel(snd_config_t *, struct snd_soc_tplg_channel *,
-	int *, unsigned int);
 
 /* Parse Control Enums.
  *
@@ -711,7 +827,7 @@ static int parse_control_enum(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg)
 	snd_config_iterator_t i, next;
 	snd_config_t *n;
 	const char *id, *val = NULL;
-	int err, num_channels;
+	int err;
 
 	elem = elem_new();
 	if (!elem)
@@ -730,15 +846,14 @@ static int parse_control_enum(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg)
 
 	/* init new mixer */	
 	elem->enum_ctrl = ec;
-	elem->type = SND_SOC_TPLG_ENUM;
+	elem->type = SND_SOC_TPLG_MIXER;
 	strncpy(ec->hdr.name, elem->id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);	
 	ec->hdr.access = SNDRV_CTL_ELEM_ACCESS_TLV_READ |
 		SNDRV_CTL_ELEM_ACCESS_READWRITE;
 
-	ec->hdr.index = SOC_CONTROL_IO_EXT |
-		SOC_CONTROL_ID(1, 1, 0);
-	ec->hdr.tlv_size = 0;
-	ec->priv.size = 0;
+	// TODO: get type ops from lookup table based on name
+	//ec->hdr.type = SOC_CONTROL_IO_EXT |
+	//	SOC_CONTROL_ID(1, 1, 0);
 
 	tplg_dbg(" Control Enum: %s\n", elem->id);
 
@@ -757,119 +872,44 @@ static int parse_control_enum(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg)
 			if (snd_config_get_string(n, &val) < 0)
 				return -EINVAL;
 
-			ec->index = atoi(val);
-			tplg_dbg("\t%s: %d\n", id, ec->index);
+			ec->hdr.index = atoi(val);
+			tplg_dbg("\t%s: %d\n", id, ec->hdr.index);
 			continue;
 		}
 
-		if (strcmp(id, "texts") == 0) {
+		if (strcmp(id, "Texts") == 0) {
 			if (snd_config_get_string(n, &val) < 0)
 				return -EINVAL;
 
-			strncpy(ec->texts, val, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
-			tplg_dbg("\t%s: %s\n", id, ec->texts);
+			strncpy(elem->text_ref, val, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
+			tplg_dbg("\t%s: %s\n", id, elem->text_ref);
 			continue;
 		}
 		
 		if (strcmp(id, "Channel") == 0) {
-			err = parse_channel(n, ec->channel, &num_channels,
-				SND_SOC_TPLG_MAX_CHAN);
+			err = parse_channel(n, ec->channel);
 			if (err < 0)
 				return err;
 			
-			ec->num_channels = num_channels;
+			ec->num_channels = err;
 			continue;
 		}
 
-		if (strcmp(id, "ops") == 0) {
+		if (strcmp(id, "Ops") == 0) {
+			err = parse_ops(n, &ec->hdr);
+			if (err < 0)
+				return err;
+			continue;
+		}
+
+		if (strcmp(id, "Data") == 0) {
 			if (snd_config_get_string(n, &val) < 0)
 				return -EINVAL;
 
-			strncpy(ec->ops, val, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
-			tplg_dbg("\t%s: %s\n", id, ec->ops);
+			strncpy(elem->data_ref, val, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
+			tplg_dbg("\t%s: %s\n", id, elem->data_ref);
 			continue;
 		}
-
-		if (strcmp(id, "data") == 0) {
-			if (snd_config_get_string(n, &val) < 0)
-				return -EINVAL;
-
-			strncpy(ec->data, val, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
-			tplg_dbg("\t%s: %s\n", id, ec->data);
-			continue;
-		}
-	}
-
-	return 0;
-}
-
-static void parse_channel_content(snd_config_t *cfg,
-	struct snd_soc_tplg_channel *channel)
-{
-	snd_config_iterator_t i, next;
-	snd_config_t *n;
-	const char *key = NULL, *value = NULL;
-	int idx = 0;
-
-	tplg_dbg("\tChannel: %s\n", channel->name);
-
-	snd_config_for_each(i, next, cfg) {
-		idx ^= 1;
-
-		n = snd_config_iterator_entry(i);
-
-		/* get key */
-		if (idx == 1) {
-			snd_config_get_string(n, &key);
-			continue;
-		}
-
-		/* get value */
-		if (snd_config_get_string(n, &value) < 0)
-			continue;
-
-		if (strcmp(key, "reg") == 0)
-			channel->reg = atoi(value);
-		else if (strcmp(key, "shift") == 0)
-			channel->shift = atoi(value);
-
-		tplg_dbg("\t\t%s = %s\n", key, value);
-	}
-}
-
-/* Parse a channel.
- *
- * Channel."channel_map.name" {
- *			reg "0"	(register)
- *			shift "0" (shift)
- * }
- */
-static int parse_channel(snd_config_t *cfg, struct snd_soc_tplg_channel *channels,
-	int *num_channels, unsigned int num_max)
-{
-	snd_config_iterator_t i, next;
-	snd_config_t *n;
-	const char *id;
-	struct snd_soc_tplg_channel *channel;
-
-	*num_channels = 0;
-
-	snd_config_for_each(i, next, cfg) {
-		if (*num_channels == num_max) {
-			tplg_error("error: channel number exceeds %d\n",
-				SND_SOC_TPLG_MAX_CHAN);
-			return -EINVAL;	
-		}
-
-		channel = &channels[*num_channels];
-		
-		n = snd_config_iterator_entry(i);
-		if (snd_config_get_id(n, &id) < 0)
-			continue;
-
-		strncpy(channel->name, id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
-		parse_channel_content(n, channel);
-		*num_channels += 1;
 	}
 
 	return 0;
@@ -903,7 +943,7 @@ static int parse_control_mixer(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg
 	snd_config_iterator_t i, next;
 	snd_config_t *n;
 	const char *id, *val = NULL;
-	int err, num_channels;
+	int err;
 
 	elem = elem_new();
 	if (!elem)
@@ -927,10 +967,9 @@ static int parse_control_mixer(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg
 	mc->hdr.access = SNDRV_CTL_ELEM_ACCESS_TLV_READ |
 		SNDRV_CTL_ELEM_ACCESS_READWRITE;
 
-	mc->hdr.index = SOC_CONTROL_IO_EXT |
-		SOC_CONTROL_ID(1, 1, 0);
-	mc->hdr.tlv_size = 0;
-	mc->priv.size = 0;
+	// TODO: get type ops from lookup table based on name
+	//mc->hdr.type = SOC_CONTROL_IO_EXT |
+	//	SOC_CONTROL_ID(1, 1, 0);
 
 	tplg_dbg(" Control Mixer: %s\n", elem->id);
 
@@ -950,18 +989,17 @@ static int parse_control_mixer(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg
 			if (snd_config_get_string(n, &val) < 0)
 				return -EINVAL;
 
-			mc->index = atoi(val);
-			tplg_dbg("\t%s: %d\n", id, mc->index);
+			mc->hdr.index = atoi(val);
+			tplg_dbg("\t%s: %d\n", id, mc->hdr.index);
 			continue;
 		}
 
 		if (strcmp(id, "Channel") == 0) {
-			err = parse_channel(n, mc->channel, &num_channels,
-				SND_SOC_TPLG_MAX_CHAN);
+			err = parse_channel(n, mc->channel);
 			if (err < 0)
 				return err;
 
-			mc->num_channels = num_channels;
+			mc->num_channels = err;
 			continue;
 		}
 
@@ -991,8 +1029,8 @@ static int parse_control_mixer(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg
 			if (snd_config_get_string(n, &val) < 0)
 				return -EINVAL;
 
-			strncpy(mc->ops, val, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
-			tplg_dbg("\t%s: %s\n", id, mc->ops);
+		//	strncpy(mc->ops, val, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
+		//	tplg_dbg("\t%s: %s\n", id, mc->ops);
 			continue;
 		}
 
@@ -1005,132 +1043,6 @@ static int parse_control_mixer(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg
 				return err;				
 
 			tplg_dbg("\t%s: %s\n", id, val);
-			continue;
-		}
-	}
-
-	return 0;
-}
-
-static int parse_referenced_mixer(snd_config_t *cfg, soc_tplg_elem_t *elem)
-{
-	snd_config_iterator_t i, next;
-	snd_config_t *n;
-	int err, idx = 0;
-	const char *key = NULL, *val = NULL;
-	struct snd_soc_tplg_mixer_control *mc;
-
-	return 0;
-
-	tplg_dbg("Referenced Mixer: %s\n", elem->id);
-	if (snd_config_get_type(cfg) != SND_CONFIG_TYPE_COMPOUND) {
-		tplg_error("error: compound is expected for control mixer definition");
-		return -EINVAL;
-	}
-
-	mc = calloc(1, sizeof(*mc));
-	if (!mc)
-		return -ENOMEM;
-	elem->mixer_ctrl = mc;
-	elem->type = SND_SOC_TPLG_MIXER;
-
-	strncpy(mc->hdr.name, elem->id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
-	mc->hdr.index = SOC_CONTROL_IO_EXT |
-		SOC_CONTROL_ID(1, 1, 0);
-	mc->hdr.access = SNDRV_CTL_ELEM_ACCESS_TLV_READ |
-		SNDRV_CTL_ELEM_ACCESS_READWRITE;
-	/* TODO: mc->hdr.tlv_size, need to get tlv info */
-	mc->priv.size  = 0;
-
-	snd_config_for_each(i, next, cfg) {
-		const char *id;
-		idx ^= 1;
-		n = snd_config_iterator_entry(i);
-		err = snd_config_get_id(n, &id);
-		if (err < 0)
-			continue;
-
-		if (snd_config_get_type(n) != SND_CONFIG_TYPE_STRING) {
-			tplg_error("error: string type is expected for sequence command");
-			return -EINVAL;
-		}
-
-		if (idx == 1) {
-			snd_config_get_string(n, &key);
-			continue;
-		}
-
-		if(snd_config_get_string(n, &val) < 0) {
-			tplg_error("Mixer %s: invalid %s definition\n", elem->id, key);
-			return -EINVAL;
-		}
-		tplg_dbg("\t%s: %s\n",key, val);
-
-#if 0
-		if (strcmp(key, "reg") == 0)
-			mc->reg = mc->rreg = atoi(val);
-		else if (strcmp(key, "reg_left") == 0)
-			mc->reg = atoi(val);
-		else if (strcmp(key, "reg_right") == 0)
-			mc->rreg = atoi(val);
-		else if (strcmp(key, "shift") == 0)
-			mc->shift = mc->rshift = atoi(val);
-		else if (strcmp(key, "shift_left") == 0)
-			mc->shift = atoi(val);
-		else if (strcmp(key, "shift_right") == 0)
-			mc->rshift = atoi(val);
-		else if (strcmp(key, "max") == 0)
-			mc->max = mc->platform_max = atoi(val);
-		else if (strcmp(key, "invert") == 0)
-			mc->invert = atoi(val);
-		else if (strcmp(key, "tlv_array") == 0) {
-			if(val[0]) {
-				err = add_ref(elem, val);
-				if (err < 0)
-					return err;
-			}
-		}
-#endif
-	}
-
-	return 0;
-}
-
-static int parse_mixer_array(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg)
-{
-	snd_config_iterator_t i, next;
-	snd_config_t *n;
-	const char *id;
-	int err = 0;
-	struct soc_tplg_elem *elem;
-
-	if (snd_config_get_type(cfg) != SND_CONFIG_TYPE_COMPOUND) {
-		tplg_error("error: compound is expected for dapm graph definition\n");
-		return -EINVAL;
-	}
-
-	elem = elem_new();
-	if (!elem)
-		return -ENOMEM;
-	list_add_tail(&elem->list, &soc_tplg->mixer_array_list);
-	snd_config_get_id(cfg, &id);
-	strncpy(elem->id, id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
-	elem->type = SND_SOC_TPLG_MIXER_ARRAY;
-
-	tplg_dbg("Mixer array '%s'\n", elem->id);
-
-	snd_config_for_each(i, next, cfg) {
-		n = snd_config_iterator_entry(i);
-		if (snd_config_get_id(n, &id) < 0) {
-			continue;
-		}
-
-		if (strcmp(id, "Mixer") == 0) {
-			err = parse_referenced_mixer(n, elem);
-			if (err < 0) {
-				tplg_error("error: failed to parse verb enable sequence\n");
-				return err;
-			}
 			continue;
 		}
 	}
@@ -1499,13 +1411,6 @@ static int tplg_parse_config(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg)
 
 		if (strcmp(id, "SectionFe") == 0) {
 			err = parse_compound(soc_tplg, n, parse_pcm_dai);
-			if (err < 0)
-				return err;
-			continue;
-		}
-
-		if (strcmp(id, "SectionMixer") == 0) {
-			err = parse_compound(soc_tplg, n, parse_mixer_array);
 			if (err < 0)
 				return err;
 			continue;

@@ -86,26 +86,38 @@ struct soc_tplg_priv {
 	struct list_head be_list;
 	struct list_head cc_list;
 	struct list_head route_list;
-	struct list_head mixer_array_list;
+	struct list_head text_list;
+	struct list_head pdata_list;
 };
 
 struct soc_tplg_elem {
 	struct list_head list;
 	char id[SNDRV_CTL_ELEM_ID_NAME_MAXLEN];
+
+	/* storage for textsand data if this is text or data elem*/
+	char texts[SND_SOC_TPLG_NUM_TEXTS][SNDRV_CTL_ELEM_ID_NAME_MAXLEN];
+	unsigned int values[SND_SOC_TPLG_NUM_TEXTS * SNDRV_CTL_ELEM_ID_NAME_MAXLEN / 4];
+
+	/* text and data sections this lement references */
+	char data_ref[SNDRV_CTL_ELEM_ID_NAME_MAXLEN];
+	char text_ref[SNDRV_CTL_ELEM_ID_NAME_MAXLEN];
+	int index;
 	u32 type;
 
-	struct snd_soc_tplg_ctl_tlv *tlv;
-	struct snd_soc_tplg_mixer_control *mixer_ctrl;
-	struct snd_soc_tplg_enum_control *enum_ctrl;
-	struct snd_soc_tplg_bytes_ext *bytes_ext;
-	struct snd_soc_tplg_dapm_widget *widget;
-	struct snd_soc_tplg_pcm_dai *pcm;
-	struct snd_soc_tplg_pcm_dai *be;
-	struct snd_soc_tplg_pcm_dai *cc;
-	struct snd_soc_tplg_dapm_graph_elem *route;
-	struct snd_soc_tplg_text *text;
-	struct snd_soc_tplg_private *data;
-	int index;
+	/* UAPI object for this elem */
+	union {
+		struct snd_soc_tplg_ctl_tlv *tlv;
+		struct snd_soc_tplg_mixer_control *mixer_ctrl;
+		struct snd_soc_tplg_enum_control *enum_ctrl;
+		struct snd_soc_tplg_bytes_ext *bytes_ext;
+		struct snd_soc_tplg_dapm_widget *widget;
+		struct snd_soc_tplg_pcm_dai *pcm;
+		struct snd_soc_tplg_pcm_dai *be;
+		struct snd_soc_tplg_pcm_dai *cc;
+		struct snd_soc_tplg_dapm_graph_elem *route;
+		struct snd_soc_tplg_text *text;
+		struct snd_soc_tplg_private *data;
+	};
 
 	/* an element may refer to other elements:
 	 * a mixer control may refer to a tlv,
