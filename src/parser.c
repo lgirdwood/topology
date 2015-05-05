@@ -269,7 +269,6 @@ static int lookup_widget(const char *w)
 	return -EINVAL;
 }
 
-#if 0
 static int lookup_channel(const char *c)
 {
 	int i;
@@ -281,13 +280,24 @@ static int lookup_channel(const char *c)
 
 	return -EINVAL;
 }
-#endif
+
+static int lookup_ops(const char *c)
+{
+	int i;
+
+	for (i = 0; i < ARRAY_SIZE(control_map); i++) {
+		if (strcmp(control_map[i].name, c) == 0)
+			return control_map[i].id;
+	}
+
+	return -EINVAL;
+}
 
 /*
  * Parse compound
  */
 static int parse_compound(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg,
-	  int (*fcn)(struct soc_tplg_priv *, snd_config_t *))
+	  int (*fcn)(struct soc_tplg_priv *, snd_config_t *, void *), void *private)
 {
 	const char *id;
 	snd_config_iterator_t i, next;
@@ -302,8 +312,6 @@ static int parse_compound(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg,
 		return -EINVAL;
 	}
 
-	tplg_dbg("parsing compound %s\n", id);
-
 	/* parse compound */
 	snd_config_for_each(i, next, cfg) {
 		n = snd_config_iterator_entry(i);
@@ -314,7 +322,7 @@ static int parse_compound(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg,
 			return -EINVAL;
 		}
 
-		err = fcn(soc_tplg, n);
+		err = fcn(soc_tplg, n, private);
 		if (err < 0)
 			return err;
 	}
@@ -355,7 +363,8 @@ static int parse_data_file(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg,
  *		DataFile <filename>
  *	}
  */
-static int parse_data(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg)
+static int parse_data(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg,
+	void *private)
 {
 	snd_config_iterator_t i, next;
 	snd_config_t *n;
@@ -393,35 +402,22 @@ static int parse_data(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg)
 	return err;
 }
 
-#define MAX_TEXT_STR_SIZE	256
-#define MAX_TEXT_STR_NUM	16
-#define TEXT_SIZE_MAX	(MAX_TEXT_STR_SIZE * MAX_TEXT_STR_NUM)
+#define TEXT_SIZE_MAX	(SND_SOC_TPLG_NUM_TEXTS * SNDRV_CTL_ELEM_ID_NAME_MAXLEN)
 
 static int parse_text_values(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg,
 	struct soc_tplg_elem *elem)
 {
-#if 0
 	snd_config_iterator_t i, next;
 	snd_config_t *n;
-	struct snd_soc_tplg_text *tplg_text;
 	const char *value = NULL;
-	int j;
+	int j = 0;
 
 	tplg_dbg(" Text Values: %s\n", elem->id);
 
-	tplg_text = calloc(1, sizeof(*tplg_text) + TEXT_SIZE_MAX);
-	if (!tplg_text)
-		return -ENOMEM;	
-
-	elem->text = tplg_text;
-	tplg_text->size = TEXT_SIZE_MAX;
-	tplg_text->num = 0;
-
 	snd_config_for_each(i, next, cfg) {
 		n = snd_config_iterator_entry(i);
-		j = tplg_text->num;
 
-		if (j == MAX_TEXT_STR_NUM) {
+		if (j == SND_SOC_TPLG_NUM_TEXTS) {
 			tplg_dbg("error: text string number exceeds %d\n", j);
 			return -ENOMEM;
 		}
@@ -429,14 +425,13 @@ static int parse_text_values(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg,
 		/* get value */
 		if (snd_config_get_string(n, &value) < 0)
 			continue;
+
+		strncpy(&elem->texts[j][0], value, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
+		tplg_dbg("\t%s\n", &elem->texts[j][0]);
 		
-		j = j * MAX_TEXT_STR_SIZE;
-		strncpy(&tplg_text->data[j], value, MAX_TEXT_STR_SIZE);
-		tplg_dbg("\t%s\n", &tplg_text->data[j]);
-		
-		tplg_text->num++;
+		j++;
 	}
-#endif
+
 	return 0;
 }
 
@@ -451,7 +446,8 @@ static int parse_text_values(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg,
  * 		]
  *	}
  */
-static int parse_text(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg)
+static int parse_text(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg,
+	void *private)
 {
 	snd_config_iterator_t i, next;
 	snd_config_t *n;
@@ -472,9 +468,8 @@ static int parse_text(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg)
 	snd_config_for_each(i, next, cfg) {
 
 		n = snd_config_iterator_entry(i);
-		if (snd_config_get_id(n, &id) < 0) {
+		if (snd_config_get_id(n, &id) < 0)
 			continue;
-		}
 		
 		if (strcmp(id, "Values") == 0) {
 			err = parse_text_values(soc_tplg, n, elem);
@@ -489,24 +484,37 @@ static int parse_text(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg)
 	return err;
 }
 
-static int parse_channel_content(snd_config_t *cfg,
-	struct snd_soc_tplg_channel *channel)
+/* Parse a channel.
+ *
+ * Channel."channel_map.name" {
+ *		reg "0"	(register)
+ *		shift "0" (shift)
+ * }
+ */
+static int parse_channel(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg,
+	void *private)
 {
 	snd_config_iterator_t i, next;
 	snd_config_t *n;
-	const char *id = NULL, *value = NULL;
+	struct snd_soc_tplg_channel *channel = private;
+	const char *id, *value;
 
-	tplg_dbg("\tChannel: %d\n", channel->id);
+	snd_config_get_id(cfg, &id);
+	channel->id = lookup_channel(id);
+	if (channel->id < 0) {
+		tplg_error("invalid channel %s\n", id);
+		return -EINVAL;
+	}
+
+	tplg_dbg("\tChannel %s\n", id);
 
 	snd_config_for_each(i, next, cfg) {
 
 		n = snd_config_iterator_entry(i);
 
-		/* get ID */
-		if (snd_config_get_id(n, &id) < 0) {
-			tplg_error("cant get ID\n");
-			return -EINVAL;
-		}
+		/* get id */
+		if (snd_config_get_id(n, &id) < 0)
+			continue;
 
 		/* get value */
 		if (snd_config_get_string(n, &value) < 0)
@@ -523,71 +531,55 @@ static int parse_channel_content(snd_config_t *cfg,
 	return 0;
 }
 
-/* Parse a channel.
- *
- * Channel."channel_map.name" {
- *		reg "0"	(register)
- *		shift "0" (shift)
- * }
- */
-static int parse_channel(snd_config_t *cfg,
-	struct snd_soc_tplg_channel *channels)
-{
-	snd_config_iterator_t i, next;
-	snd_config_t *n;
-	const char *id;
-	struct snd_soc_tplg_channel *channel;
-	int num_channels = 0;
-
-	snd_config_for_each(i, next, cfg) {
-		if (num_channels == SND_SOC_TPLG_MAX_CHAN) {
-			tplg_error("error: channel number exceeds %d\n",
-				SND_SOC_TPLG_MAX_CHAN);
-			return -EINVAL;	
-		}
-
-		channel = &channels[num_channels];
-		
-		n = snd_config_iterator_entry(i);
-		if (snd_config_get_id(n, &id) < 0)
-			continue;
-
-		// TODO: lookup channel ID from name using table
-		//strncpy(channel->name, id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
-		parse_channel_content(n, channel);
-		num_channels++;
-	}
-
-	return num_channels;
-}
-
 /* Parse Control operations.
  *
  * Ops [
  *	info <string>
  *	get <string>
  *	put <string>
- *	drv_get <string>
- *	drv_put <string>
  * }
  */
-static int parse_ops(snd_config_t *cfg,
-	struct snd_soc_tplg_ctl_hdr *hdr)
+static int parse_ops(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg,
+	void *private)
 {
 	snd_config_iterator_t i, next;
 	snd_config_t *n;
-	const char *id;
+	struct snd_soc_tplg_ctl_hdr *hdr = private;
+	const char *id, *value;
+	unsigned int info = 0, get = 0, put = 0;
+
+	tplg_dbg("\tOps\n");
 
 	snd_config_for_each(i, next, cfg) {
-		
+
 		n = snd_config_iterator_entry(i);
+
+		/* get id */
 		if (snd_config_get_id(n, &id) < 0)
 			continue;
 
-		// TODO: lookup Ops ID from name using table
-		
+		/* get value */
+		if (snd_config_get_string(n, &value) < 0)
+			continue;
+
+		if (strcmp(id, "info") == 0) {
+			info = lookup_ops(value);
+			if (info < 0)
+				info = atoi(value);
+		} else if (strcmp(id, "get") == 0) {
+			put = lookup_ops(value);
+			if (put < 0)
+			put = atoi(value);
+		} else if (strcmp(id, "put") == 0) {
+			get = lookup_ops(value);
+			if (get < 0)
+				get = atoi(value);
+		}
+
+		tplg_dbg("\t\t%s = %s\n", id, value);
 	}
 
+	hdr->type = SND_SOC_TPLG_CTL_SID(get, put, info);
 	return 0;
 }
 
@@ -663,7 +655,8 @@ static int parse_tlv_dbscale(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg,
  * 		]
  *	}
  */
-static int parse_tlv(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg)
+static int parse_tlv(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg,
+	void *private)
 {
 	snd_config_iterator_t i, next;
 	snd_config_t *n;
@@ -678,6 +671,7 @@ static int parse_tlv(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg)
 	list_add_tail(&elem->list, &soc_tplg->tlv_list);
 
 	snd_config_get_id(cfg, &id);
+
 	strncpy(elem->id, id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
 	elem->type = SND_SOC_TPLG_TLV;
 
@@ -714,7 +708,8 @@ static int parse_tlv(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg)
  *	mask "0xff"
  * }
  */
-static int parse_control_bytes(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg)
+static int parse_control_bytes(struct soc_tplg_priv *soc_tplg,
+	snd_config_t *cfg, void *private)
 {
 	struct snd_soc_tplg_bytes_ext *be;
 	struct soc_tplg_elem *elem;
@@ -820,7 +815,8 @@ static int parse_control_bytes(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg
  *	tlv "hsw_vol_tlv"
  * }
  */
-static int parse_control_enum(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg)
+static int parse_control_enum(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg,
+	void *private)
 {
 	struct snd_soc_tplg_enum_control *ec;
 	struct soc_tplg_elem *elem;
@@ -858,10 +854,11 @@ static int parse_control_enum(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg)
 	tplg_dbg(" Control Enum: %s\n", elem->id);
 
 	snd_config_for_each(i, next, cfg) {
+
 		n = snd_config_iterator_entry(i);
 		if (snd_config_get_id(n, &id) < 0)
 			continue;
-
+ 
 		/* skip comments */
 		if (strcmp(id, "Comment") == 0)
 			continue;
@@ -887,7 +884,8 @@ static int parse_control_enum(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg)
 		}
 		
 		if (strcmp(id, "Channel") == 0) {
-			err = parse_channel(n, ec->channel);
+			err = parse_compound(soc_tplg, n, parse_channel,
+				ec->channel);
 			if (err < 0)
 				return err;
 			
@@ -896,7 +894,7 @@ static int parse_control_enum(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg)
 		}
 
 		if (strcmp(id, "Ops") == 0) {
-			err = parse_ops(n, &ec->hdr);
+			err = parse_compound(soc_tplg, n, parse_ops, &ec->hdr);
 			if (err < 0)
 				return err;
 			continue;
@@ -936,7 +934,8 @@ static int parse_control_enum(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg)
  *	tlv "hsw_vol_tlv"
  * }
  */
-static int parse_control_mixer(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg)
+static int parse_control_mixer(struct soc_tplg_priv *soc_tplg,
+	snd_config_t *cfg, void *private)
 {
 	struct snd_soc_tplg_mixer_control *mc;
 	struct soc_tplg_elem *elem;
@@ -989,13 +988,15 @@ static int parse_control_mixer(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg
 			if (snd_config_get_string(n, &val) < 0)
 				return -EINVAL;
 
-			mc->hdr.index = atoi(val);
+			elem->index = atoi(val);
 			tplg_dbg("\t%s: %d\n", id, mc->hdr.index);
 			continue;
 		}
 
 		if (strcmp(id, "Channel") == 0) {
-			err = parse_channel(n, mc->channel);
+
+			err = parse_compound(soc_tplg, n, parse_channel,
+				mc->channel);
 			if (err < 0)
 				return err;
 
@@ -1025,12 +1026,10 @@ static int parse_control_mixer(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg
 			continue;
 		}
 
-		if (strcmp(id, "ops") == 0) {
-			if (snd_config_get_string(n, &val) < 0)
-				return -EINVAL;
-
-		//	strncpy(mc->ops, val, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
-		//	tplg_dbg("\t%s: %s\n", id, mc->ops);
+		if (strcmp(id, "Ops") == 0) {
+			err = parse_compound(soc_tplg, n, parse_ops, &mc->hdr);
+			if (err < 0)
+				return err;
 			continue;
 		}
 
@@ -1062,11 +1061,6 @@ static int parse_widget(snd_config_t *cfg, soc_tplg_elem_t *elem)
 	const char *key = NULL, *val = NULL;
 	struct snd_soc_tplg_dapm_widget *widget;
 	int widget_type;
-
-	if (snd_config_get_type(cfg) != SND_CONFIG_TYPE_COMPOUND) {
-		tplg_error("error: compound is expected for dapm widget definition\n");
-		return -EINVAL;
-	}
 
 	widget = calloc(1, sizeof(*widget));
 	if (!widget)
@@ -1110,6 +1104,15 @@ static int parse_widget(snd_config_t *cfg, soc_tplg_elem_t *elem)
 		}
 		tplg_dbg("\t%s: %s\n",key, val);
 
+		if (strcmp(id, "Index") == 0) {
+			if (snd_config_get_string(n, &val) < 0)
+				return -EINVAL;
+
+			elem->index = atoi(val);
+			tplg_dbg("\t%s: %d\n", id, elem->index);
+			continue;
+		}
+
 		if (strcmp(key, "stream_name") == 0)
 			strncpy(widget->sname, val, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
 		else if (strcmp(key, "reg") == 0)
@@ -1129,7 +1132,8 @@ static int parse_widget(snd_config_t *cfg, soc_tplg_elem_t *elem)
 	return 0;
 }
 
-static int parse_dapm_widget(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg)
+static int parse_dapm_widget(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg,
+	void *private)
 {
 	snd_config_iterator_t i, next;
 	snd_config_t *n;
@@ -1205,7 +1209,8 @@ static int parse_routes(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg)
 	return 0;
 }
 
-static int parse_dapm_graph(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg)
+static int parse_dapm_graph(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg,
+	void *private)
 {
 	snd_config_iterator_t i, next;
 	snd_config_t *n;
@@ -1288,7 +1293,8 @@ static int parse_pcm_dai_stream(snd_config_t *cfg, struct soc_tplg_elem *elem,
 	return 0;
 }
 
-static int parse_pcm_dai(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg)
+static int parse_pcm_dai(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg,
+	void *private)
 {
 	snd_config_iterator_t i, next;
 	snd_config_t *n;
@@ -1368,63 +1374,63 @@ static int tplg_parse_config(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg)
 			continue;
 
 		if (strcmp(id, "SectionTLV") == 0) {
-			err = parse_compound(soc_tplg, n, parse_tlv);
+			err = parse_compound(soc_tplg, n, parse_tlv, NULL);
 			if (err < 0)
 				return err;
 			continue;
 		}
 
 		if (strcmp(id, "SectionControlMixer") == 0) {
-			err = parse_compound(soc_tplg, n, parse_control_mixer);
+			err = parse_compound(soc_tplg, n, parse_control_mixer, NULL);
 			if (err < 0)
 				return err;
 			continue;
 		}
 
 		if (strcmp(id, "SectionControlEnum") == 0) {
-			err = parse_compound(soc_tplg, n, parse_control_enum);
+			err = parse_compound(soc_tplg, n, parse_control_enum, NULL);
 			if (err < 0)
 				return err;
 			continue;
 		}
 
 		if (strcmp(id, "SectionControlBytes") == 0) {
-			err = parse_compound(soc_tplg, n, parse_control_bytes);
+			err = parse_compound(soc_tplg, n, parse_control_bytes, NULL);
 			if (err < 0)
 				return err;
 			continue;
 		}
 
 		if (strcmp(id, "SectionWidget") == 0) {
-			err = parse_compound(soc_tplg, n, parse_dapm_widget);
+			err = parse_compound(soc_tplg, n, parse_dapm_widget, NULL);
 			if (err < 0)
 				return err;
 			continue;
 		}
 
 		if (strcmp(id, "SectionGraph") == 0) {
-			err = parse_compound(soc_tplg, n, parse_dapm_graph);
+			err = parse_compound(soc_tplg, n, parse_dapm_graph, NULL);
 			if (err < 0)
 				return err;
 			continue;
 		}
 
 		if (strcmp(id, "SectionFe") == 0) {
-			err = parse_compound(soc_tplg, n, parse_pcm_dai);
+			err = parse_compound(soc_tplg, n, parse_pcm_dai, NULL);
 			if (err < 0)
 				return err;
 			continue;
 		}
 
 		if (strcmp(id, "SectionText") == 0) {
-			err = parse_compound(soc_tplg, n, parse_text);
+			err = parse_compound(soc_tplg, n, parse_text, NULL);
 			if (err < 0)
 				return err;
 			continue;
 		}
 
 		if (strcmp(id, "SectionData") == 0) {
-			err = parse_compound(soc_tplg, n, parse_data);
+			err = parse_compound(soc_tplg, n, parse_data, NULL);
 			if (err < 0)
 				return err;
 			continue;
