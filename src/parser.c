@@ -1049,116 +1049,107 @@ static int parse_control_mixer(struct soc_tplg_priv *soc_tplg,
 	return 0;
 }
 
-/* Supported widget type: AIF_IN AIF_OUT MIXER
+/* Parse widget
  *
+ * SectionWidget."widget name" {
+ *
+ *	Index
+ *	Type
+ *	no_pm
+ *	enum
+ * }
  */
-static int parse_widget(snd_config_t *cfg, soc_tplg_elem_t *elem)
+static int parse_dapm_widget(struct soc_tplg_priv *soc_tplg,
+	snd_config_t *cfg, void *private)
 {
+	struct snd_soc_tplg_dapm_widget *widget;
+	struct soc_tplg_elem *elem;
 	snd_config_iterator_t i, next;
 	snd_config_t *n;
-	int err, idx = 0;
-	const char *type;
-	const char *key = NULL, *val = NULL;
-	struct snd_soc_tplg_dapm_widget *widget;
-	int widget_type;
+	const char *id, *val = NULL;
+	int widget_type, err;
+
+	elem = elem_new();
+	if (!elem)
+		return -ENOMEM;
 
 	widget = calloc(1, sizeof(*widget));
-	if (!widget)
+	if (!widget) {
+		free(widget);
 		return -ENOMEM;
+	}
+
+	/* add new element to widget list */
+	list_add_tail(&elem->list, &soc_tplg->widget_list);
+	snd_config_get_id(cfg, &id);
+	strncpy(elem->id, id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
 
 	elem->widget = widget;
 	elem->type = SND_SOC_TPLG_DAPM_WIDGET;
 	strncpy(widget->name, elem->id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
 
-	/* check widget type */
-	snd_config_get_id(cfg, &type);
-	tplg_dbg("Widget %s, type %s\n", elem->id, type);
-	widget_type = lookup_widget(type);
-	if (widget_type < 0){
-		tplg_error("Widget '%s': Unsupported widget type %s\n", elem->id, type);
-	}
-	widget->id = widget_type;
+	tplg_dbg(" Widget: %s\n", elem->id);
 
-	/* todo: fill widget data */
 	snd_config_for_each(i, next, cfg) {
-		const char *id;
-		idx ^= 1;
 		n = snd_config_iterator_entry(i);
-		err = snd_config_get_id(n, &id);
-		if (err < 0)
+		if (snd_config_get_id(n, &id) < 0)
 			continue;
 
-		if (snd_config_get_type(n) != SND_CONFIG_TYPE_STRING) {
-			tplg_error("error: string type is expected for sequence command");
-			return -EINVAL;
-		}
-
-		if (idx == 1) {
-			snd_config_get_string(n, &key);
+		/* skip comments */
+		if (strcmp(id, "Comment") == 0)
 			continue;
-		}
-
-		if(snd_config_get_string(n, &val) < 0) {
-			tplg_error("Widget %s: invalid %s definition\n", elem->id, key);
-			return -EINVAL;
-		}
-		tplg_dbg("\t%s: %s\n",key, val);
+		if (id[0] == '#')
+			continue;
 
 		if (strcmp(id, "Index") == 0) {
 			if (snd_config_get_string(n, &val) < 0)
 				return -EINVAL;
 
-			elem->index = atoi(val);
-			tplg_dbg("\t%s: %d\n", id, elem->index);
+			widget->index = atoi(val);
+			tplg_dbg("\t%s: %d\n", id, widget->index);
 			continue;
 		}
 
-		if (strcmp(key, "stream_name") == 0)
-			strncpy(widget->sname, val, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
-		else if (strcmp(key, "reg") == 0)
-			widget->reg = atoi(val);
-		else if (strcmp(key, "shift") == 0)
-			widget->shift = atoi(val);
-		else if (strcmp(key, "invert") == 0)
-			widget->invert = atoi(val);
-		else if (strcmp(key, "controls") == 0) {
-			if(val[0]) {
-				err = add_ref(elem, val);
-				if (err < 0)
-					return err;
+		if (strcmp(id, "Type") == 0) {
+			if (snd_config_get_string(n, &val) < 0)
+				return -EINVAL;
+
+			widget_type = lookup_widget(val);
+			if (widget_type < 0){
+				tplg_error("Widget '%s': Unsupported widget type %s\n",
+					elem->id, val);
+				continue;
 			}
-		}
-	}
-	return 0;
-}
 
-static int parse_dapm_widget(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg,
-	void *private)
-{
-	snd_config_iterator_t i, next;
-	snd_config_t *n;
-	const char *id;
-	int err = 0;
-	struct soc_tplg_elem *elem;
-
-	elem = elem_new();
-	if (!elem)
-		return -ENOMEM;
-	list_add_tail(&elem->list, &soc_tplg->widget_list);
-	snd_config_get_id(cfg, &id);
-	strncpy(elem->id, id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
-
-	snd_config_for_each(i, next, cfg) {
-		n = snd_config_iterator_entry(i);
-		if (snd_config_get_id(n, &id) < 0) {
+			widget->id = widget_type;
+			tplg_dbg("\t%s: %s\n", id, val);
 			continue;
 		}
-		err = parse_widget(n, elem);
-		if (err < 0) {
-			tplg_error("error: failed to parse widget %s, type %s\n", elem->id, id);
-			return err;
+
+		if (strcmp(id, "no_pm") == 0) {
+			if (snd_config_get_string(n, &val) < 0)
+				return -EINVAL;
+
+			if (strcmp(val, "true") == 0)
+				widget->no_pm = 1;
+			else if (strcmp(val, "false") == 0)
+				widget->no_pm = 0;
+
+			tplg_dbg("\t%s: %s\n", id, val);
+			continue;
 		}
-		continue;
+
+		if (strcmp(id, "enum") == 0) {
+			if (snd_config_get_string(n, &val) < 0)
+				return -EINVAL;
+
+			err = add_ref(elem, val);
+			if (err < 0)
+				return err;
+
+			tplg_dbg("\t%s: %s\n", id, val);
+			continue;			
+		}
 	}
 
 	return 0;
