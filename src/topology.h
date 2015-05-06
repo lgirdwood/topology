@@ -143,6 +143,8 @@ struct soc_tplg_ref {
 };
 typedef struct soc_tplg_ref  soc_tplg_ref_t;
 
+int socfw_write_data(struct soc_tplg_priv *soc_tplg);
+
 #define SOC_TPLG_DEBUG  /* TO REMOVE */
 #ifdef SOC_TPLG_DEBUG
 #define tplg_dbg tplg_error

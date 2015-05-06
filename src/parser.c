@@ -22,6 +22,10 @@ struct map_elem {
 	int id;
 };
 
+static int parse_compound(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg,
+	int (*fcn)(struct soc_tplg_priv *, snd_config_t *, void *),
+	void *private);
+
 static const struct map_elem widget_map[] = {
 	{"input", SND_SOC_TPLG_DAPM_INPUT},
 	{"output", SND_SOC_TPLG_DAPM_OUTPUT},
@@ -117,7 +121,7 @@ static void tplg_error(const char *fmt, ...)
 	va_list va;
 
 	va_start(va, fmt);
-	vfprintf(stdout, fmt, va);
+	vfprintf(stderr, fmt, va);
 	va_end(va);
 }
 
@@ -254,6 +258,7 @@ static soc_tplg_elem_t *lookup_element(struct list_head *base,
 	return NULL;
 }
 
+#if 0
 static soc_tplg_elem_t *lookup_pcm_dai_stream(struct list_head *base, const char* id)
 {
 	struct list_head *pos, *npos;
@@ -275,6 +280,7 @@ static soc_tplg_elem_t *lookup_pcm_dai_stream(struct list_head *base, const char
 
 	return NULL;
 }
+#endif
 
 static int lookup_widget(const char *w)
 {
@@ -310,43 +316,6 @@ static int lookup_ops(const char *c)
 	}
 
 	return -EINVAL;
-}
-
-/*
- * Parse compound
- */
-static int parse_compound(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg,
-	  int (*fcn)(struct soc_tplg_priv *, snd_config_t *, void *), void *private)
-{
-	const char *id;
-	snd_config_iterator_t i, next;
-	snd_config_t *n;
-	int err;
-
-	if (snd_config_get_id(cfg, &id) < 0)
-		return -EINVAL;
-
-	if (snd_config_get_type(cfg) != SND_CONFIG_TYPE_COMPOUND) {
-		tplg_error("compound type expected for %s", id);
-		return -EINVAL;
-	}
-
-	/* parse compound */
-	snd_config_for_each(i, next, cfg) {
-		n = snd_config_iterator_entry(i);
-
-		if (snd_config_get_type(cfg) != SND_CONFIG_TYPE_COMPOUND) {
-			tplg_error("compound type expected for %s, is %d",
-				id, snd_config_get_type(cfg));
-			return -EINVAL;
-		}
-
-		err = fcn(soc_tplg, n, private);
-		if (err < 0)
-			return err;
-	}
-
-	return 0;
 }
 
 static int parse_data_file(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg,
@@ -525,6 +494,7 @@ static int parse_channel(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg,
 		return -EINVAL;
 	}
 
+	channel->size = sizeof(*channel);
 	tplg_dbg("\tChannel %s\n", id);
 
 	snd_config_for_each(i, next, cfg) {
@@ -568,6 +538,7 @@ static int parse_ops(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg,
 	unsigned int info = 0, get = 0, put = 0;
 
 	tplg_dbg("\tOps\n");
+	hdr->size = sizeof(*hdr);
 
 	snd_config_for_each(i, next, cfg) {
 
@@ -631,7 +602,7 @@ static int parse_tlv_dbscale(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg,
 
 	elem->tlv = tplg_tlv;
 	tplg_tlv->numid = SNDRV_CTL_TLVT_DB_SCALE;
-	tplg_tlv->size = TLV_DB_SCALE_SIZE;
+	tplg_tlv->size = sizeof(*tplg_tlv) + TLV_DB_SCALE_SIZE;
 
 	snd_config_for_each(i, next, cfg) {
 
@@ -752,8 +723,9 @@ static int parse_control_bytes(struct soc_tplg_priv *soc_tplg,
 	strncpy(elem->id, id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
 
 	elem->bytes_ext = be;
-	elem->type = SND_SOC_TPLG_BYTES_EXT;
+	elem->type = SND_SOC_TPLG_BYTES;
 	strncpy(be->hdr.name, elem->id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
+	be->size = sizeof(*be);
 
 	// TODO: get type ops from lookup table based on name
 	//be->hdr.type = SOC_CONTROL_IO_EXT |
@@ -861,10 +833,11 @@ static int parse_control_enum(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg,
 
 	/* init new mixer */	
 	elem->enum_ctrl = ec;
-	elem->type = SND_SOC_TPLG_MIXER;
+	elem->type = SND_SOC_TPLG_ENUM;
 	strncpy(ec->hdr.name, elem->id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);	
 	ec->hdr.access = SNDRV_CTL_ELEM_ACCESS_TLV_READ |
 		SNDRV_CTL_ELEM_ACCESS_READWRITE;
+	ec->size = sizeof(*ec);
 
 	// TODO: get type ops from lookup table based on name
 	//ec->hdr.type = SOC_CONTROL_IO_EXT |
@@ -984,6 +957,7 @@ static int parse_control_mixer(struct soc_tplg_priv *soc_tplg,
 	strncpy(mc->hdr.name, elem->id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);	
 	mc->hdr.access = SNDRV_CTL_ELEM_ACCESS_TLV_READ |
 		SNDRV_CTL_ELEM_ACCESS_READWRITE;
+	mc->size = sizeof(*mc);
 
 	// TODO: get type ops from lookup table based on name
 	//mc->hdr.type = SOC_CONTROL_IO_EXT |
@@ -1106,6 +1080,7 @@ static int parse_dapm_widget(struct soc_tplg_priv *soc_tplg,
 	elem->widget = widget;
 	elem->type = SND_SOC_TPLG_DAPM_WIDGET;
 	strncpy(widget->name, elem->id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
+	widget->size = sizeof(*widget);
 
 	tplg_dbg(" Widget: %s\n", elem->id);
 
@@ -1150,9 +1125,7 @@ static int parse_dapm_widget(struct soc_tplg_priv *soc_tplg,
 				return -EINVAL;
 
 			if (strcmp(val, "true") == 0)
-				widget->no_pm = 1;
-			else if (strcmp(val, "false") == 0)
-				widget->no_pm = 0;
+				widget->reg = -1;
 
 			tplg_dbg("\t%s: %s\n", id, val);
 			continue;
@@ -1195,6 +1168,8 @@ static int parse_stream(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg,
 	const char *id, *val;
 	struct snd_soc_tplg_stream *stream = private;
 	__le64 format;
+
+	stream->size = sizeof(*stream);
 
 	if (snd_config_get_id(cfg, &id) < 0)
 		return -EINVAL;
@@ -1270,7 +1245,7 @@ static int parse_pcm_config(struct soc_tplg_priv *soc_tplg,
 
 	elem->stream_cfg = sc;
 	elem->type = SND_SOC_TPLG_STREAM_CONFIG;
-	strncpy(sc->name, elem->id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);	
+	sc->size = sizeof(*sc);
 
 	tplg_dbg(" PCM Config: %s\n", elem->id);
 
@@ -1317,6 +1292,8 @@ static int parse_caps(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg,
 {
 	const char *id, *val;
 	struct snd_soc_tplg_stream_caps *caps = private;
+
+	caps->size = sizeof(*caps);
 
 	if (snd_config_get_id(cfg, &id) < 0)
 		return -EINVAL;
@@ -1382,6 +1359,7 @@ static int parse_pcm_caps(struct soc_tplg_priv *soc_tplg,
 	snd_config_get_id(cfg, &id);
 	strncpy(elem->id, id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
 
+	sc->size = sizeof(*sc);
 	elem->stream_caps = sc;
 	elem->type = SND_SOC_TPLG_STREAM_CAPS;
 	strncpy(sc->name, elem->id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);	
@@ -1501,6 +1479,8 @@ static int parse_pcm_dai_stream(snd_config_t *cfg, struct soc_tplg_elem *elem,
 	const char *key = NULL, *val = NULL;
 	struct snd_soc_tplg_pcm_dai *pcm_dai = elem->pcm;
 
+	pcm_dai->size = sizeof(*pcm_dai);
+
 	if (snd_config_get_type(cfg) != SND_CONFIG_TYPE_COMPOUND) {
 		tplg_error("error: compound is expected for stream definition\n");
 		return -EINVAL;
@@ -1569,6 +1549,7 @@ static int parse_pcm_dai(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg,
 		return -ENOMEM;
 	elem->pcm = pcm_dai;
 	elem->type = SND_SOC_TPLG_PCM;
+	pcm_dai->size = sizeof(pcm_dai);
 
 	printf("find pcm_dai '%s'\n", elem->id);
 
@@ -1597,6 +1578,44 @@ static int parse_pcm_dai(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg,
 			}
 			continue;
 		}
+	}
+
+	return 0;
+}
+
+/*
+ * Parse compound
+ */
+static int parse_compound(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg,
+	int (*fcn)(struct soc_tplg_priv *, snd_config_t *, void *),
+	void *private)
+{
+	const char *id;
+	snd_config_iterator_t i, next;
+	snd_config_t *n;
+	int err;
+
+	if (snd_config_get_id(cfg, &id) < 0)
+		return -EINVAL;
+
+	if (snd_config_get_type(cfg) != SND_CONFIG_TYPE_COMPOUND) {
+		tplg_error("compound type expected for %s", id);
+		return -EINVAL;
+	}
+
+	/* parse compound */
+	snd_config_for_each(i, next, cfg) {
+		n = snd_config_iterator_entry(i);
+
+		if (snd_config_get_type(cfg) != SND_CONFIG_TYPE_COMPOUND) {
+			tplg_error("compound type expected for %s, is %d",
+				id, snd_config_get_type(cfg));
+			return -EINVAL;
+		}
+
+		err = fcn(soc_tplg, n, private);
+		if (err < 0)
+			return err;
 	}
 
 	return 0;
@@ -1745,6 +1764,7 @@ static int tplg_load_config(const char *file, snd_config_t **cfg)
 
 static int check_routes(struct soc_tplg_priv *soc_tplg)
 {
+#if 0
 	struct list_head *base, *pos, *npos;
 	soc_tplg_elem_t *elem;
 	struct snd_soc_tplg_dapm_graph_elem *route;
@@ -1752,6 +1772,7 @@ static int check_routes(struct soc_tplg_priv *soc_tplg)
 	base = &soc_tplg->route_list;
 	list_for_each_safe(pos, npos, base) {
 		elem = list_entry(pos, soc_tplg_elem_t, list);
+
 		if (!elem->route || elem->type != SND_SOC_TPLG_DAPM_GRAPH) {
 			tplg_error("Invalid route 's'\n", elem->id);
 			return -EINVAL;
@@ -1787,7 +1808,7 @@ static int check_routes(struct soc_tplg_priv *soc_tplg)
 			return -EINVAL;
 		}
 	}
-
+#endif
 	return 0;
 }
 
@@ -1819,18 +1840,15 @@ static int check_referenced_tlv(struct soc_tplg_priv *soc_tplg,
 
 static int check_controls(struct soc_tplg_priv *soc_tplg)
 {
-
 	struct list_head *base, *pos, *npos;
 	soc_tplg_elem_t *elem;
 	int err;
 
 	base = &soc_tplg->control_list;
+
 	list_for_each_safe(pos, npos, base) {
+
 		elem = list_entry(pos, soc_tplg_elem_t, list);
-		if (!elem->mixer_ctrl|| elem->type != SND_SOC_TPLG_MIXER) {
-			tplg_error("Invalid control 's'\n", elem->id);
-			return -EINVAL;
-		}
 
 		err = check_referenced_tlv(soc_tplg, elem);
 		if (err < 0)
@@ -1910,6 +1928,12 @@ int parse_conf(struct soc_tplg_priv *soc_tplg, const char *filename)
 	err = tplg_check_integ(soc_tplg);
 	if (err < 0) {
 		tplg_error("Failed to check topology integrity\n");
+		goto out;
+	}
+
+	err = socfw_write_data(soc_tplg);
+	if (err < 0) {
+		tplg_error("Failed to write data %d\n", err);
 		goto out;
 	}
 
