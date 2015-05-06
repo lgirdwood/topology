@@ -210,6 +210,7 @@ struct soc_tplg_priv *socfw_new(const char *name, int verbose)
 	INIT_LIST_HEAD(&soc_tplg->pdata_list);
 	INIT_LIST_HEAD(&soc_tplg->text_list);
 	INIT_LIST_HEAD(&soc_tplg->pcm_config_list);
+	INIT_LIST_HEAD(&soc_tplg->pcm_caps_list);
 
 	return soc_tplg;
 }
@@ -228,6 +229,7 @@ void socfw_free(struct soc_tplg_priv *soc_tplg)
 	free_elem_list(&soc_tplg->pdata_list);
 	free_elem_list(&soc_tplg->text_list);
 	free_elem_list(&soc_tplg->pcm_config_list);
+	free_elem_list(&soc_tplg->pcm_caps_list);
 	
 	free(soc_tplg);
 }
@@ -1304,6 +1306,109 @@ static int parse_pcm_config(struct soc_tplg_priv *soc_tplg,
 		}
 	}
 
+	return 0;
+}
+
+/*
+ * Parse a stream capabilities
+ */
+static int parse_caps(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg,
+	void *private)
+{
+	const char *id, *val;
+	struct snd_soc_tplg_stream_caps *caps = private;
+
+	if (snd_config_get_id(cfg, &id) < 0)
+		return -EINVAL;
+
+	if (snd_config_get_string(cfg, &val) < 0)
+		return -EINVAL;
+
+	if (strcmp(id, "format") == 0) {
+
+		/* jinyao: TODO split the format string */
+
+	} else if (strcmp(id, "rate_min") == 0) {
+		caps->rate_min = atoi(val);
+		tplg_dbg("\t\t%s: %d\n", id, caps->rate_min);
+	} else if (strcmp(id, "rate_max") == 0) {
+		caps->rate_max = atoi(val);
+		tplg_dbg("\t\t%s: %d\n", id, caps->rate_max);
+	} else if (strcmp(id, "channels_min") == 0) {
+		caps->channels_min = atoi(val);
+		tplg_dbg("\t\t%s: %d\n", id, caps->channels_min);
+	} else if (strcmp(id, "channels_max") == 0) {
+		caps->channels_max = atoi(val);
+		tplg_dbg("\t\t%s: %d\n", id, caps->channels_max);
+	}
+
+	return 0;
+}
+
+/* Parse pcm Capabilities
+ *
+ * SectionPCMCapabilities." PCM capabilities name" {
+ *
+ *	Capabilities {
+ *		formats "S24_LE, S16_LE"
+ *		rate_min "48000"
+ *		rate_max "48000"
+ *		channels_min "2"
+ *		channels_max "2"
+ *	}
+ * } 
+ */
+static int parse_pcm_caps(struct soc_tplg_priv *soc_tplg,
+	snd_config_t *cfg, void *private)
+{
+	struct snd_soc_tplg_stream_caps *sc;
+	struct soc_tplg_elem *elem;
+	snd_config_iterator_t i, next;
+	snd_config_t *n;
+	const char *id;
+	int err;
+
+	elem = elem_new();
+	if (!elem)
+		return -ENOMEM;
+
+	sc = calloc(1, sizeof(*sc));
+	if (!sc) {
+		free(elem);
+		return -ENOMEM;
+	}
+
+	list_add_tail(&elem->list, &soc_tplg->pcm_caps_list);
+	snd_config_get_id(cfg, &id);
+	strncpy(elem->id, id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
+
+	elem->stream_caps = sc;
+	elem->type = SND_SOC_TPLG_STREAM_CAPS;
+	strncpy(sc->name, elem->id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);	
+
+	tplg_dbg(" PCM Capabilities: %s\n", elem->id);
+
+	snd_config_for_each(i, next, cfg) {
+		n = snd_config_iterator_entry(i);
+		if (snd_config_get_id(n, &id) < 0)
+			continue;
+
+		/* skip comments */
+		if (strcmp(id, "Comment") == 0)
+			continue;
+		if (id[0] == '#')
+			continue;
+
+		if (strcmp(id, "Capabilities") == 0) {
+
+			tplg_dbg("\tCapabilities\n");
+			err = parse_compound(soc_tplg, n, parse_caps, sc);
+			if (err < 0)
+				return err;
+			continue;
+		}
+	}
+
 	return 0;	
 }
 
@@ -1553,6 +1658,13 @@ static int tplg_parse_config(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg)
 
 		if (strcmp(id, "SectionPCMConfig") == 0) {
 			err = parse_compound(soc_tplg, n, parse_pcm_config, NULL);
+			if (err < 0)
+				return err;
+			continue;
+		}
+
+		if (strcmp(id, "SectionPCMCapabilities") == 0) {
+			err = parse_compound(soc_tplg, n, parse_pcm_caps, NULL);
 			if (err < 0)
 				return err;
 			continue;
