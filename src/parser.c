@@ -97,6 +97,21 @@ static const struct map_elem widget_control_map[] = {
 	{"enum_value", SND_SOC_TPLG_DAPM_CTL_ENUM_VALUE},
 };
 
+static const struct map_elem pcm_format_map[] = {
+	{"S16_LE", SNDRV_PCM_FORMAT_S16_LE},
+	{"S16_BE", SNDRV_PCM_FORMAT_S16_BE},
+	{"U16_LE", SNDRV_PCM_FORMAT_U16_LE},
+	{"U16_BE", SNDRV_PCM_FORMAT_U16_BE},
+	{"S24_LE", SNDRV_PCM_FORMAT_S24_LE},
+	{"S24_BE", SNDRV_PCM_FORMAT_S24_BE},
+	{"U24_LE", SNDRV_PCM_FORMAT_U24_LE},
+	{"U24_BE", SNDRV_PCM_FORMAT_U24_BE},
+	{"S32_LE", SNDRV_PCM_FORMAT_S32_LE},
+	{"S32_BE", SNDRV_PCM_FORMAT_S32_BE},
+	{"U32_LE", SNDRV_PCM_FORMAT_U32_LE},
+	{"U32_BE", SNDRV_PCM_FORMAT_U32_BE},
+};
+
 static void tplg_error(const char *fmt, ...)
 {
 	va_list va;
@@ -194,6 +209,7 @@ struct soc_tplg_priv *socfw_new(const char *name, int verbose)
 	INIT_LIST_HEAD(&soc_tplg->route_list);
 	INIT_LIST_HEAD(&soc_tplg->pdata_list);
 	INIT_LIST_HEAD(&soc_tplg->text_list);
+	INIT_LIST_HEAD(&soc_tplg->pcm_config_list);
 
 	return soc_tplg;
 }
@@ -211,7 +227,8 @@ void socfw_free(struct soc_tplg_priv *soc_tplg)
 	free_elem_list(&soc_tplg->route_list);
 	free_elem_list(&soc_tplg->pdata_list);
 	free_elem_list(&soc_tplg->text_list);
-
+	free_elem_list(&soc_tplg->pcm_config_list);
+	
 	free(soc_tplg);
 }
 
@@ -1118,7 +1135,7 @@ static int parse_dapm_widget(struct soc_tplg_priv *soc_tplg,
 			if (widget_type < 0){
 				tplg_error("Widget '%s': Unsupported widget type %s\n",
 					elem->id, val);
-				continue;
+				return -EINVAL;
 			}
 
 			widget->id = widget_type;
@@ -1153,6 +1170,141 @@ static int parse_dapm_widget(struct soc_tplg_priv *soc_tplg,
 	}
 
 	return 0;
+}
+
+static __le64 lookup_pcm_format(const char *c)
+{
+	int i;
+
+	for (i = 0; i < ARRAY_SIZE(pcm_format_map); i++) {
+		if (strcmp(pcm_format_map[i].name, c) == 0)
+			return pcm_format_map[i].id;
+	}
+
+	return -EINVAL;
+}
+
+/*
+ * Parse a stream.
+ */
+static int parse_stream(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg,
+	void *private)
+{
+	const char *id, *val;
+	struct snd_soc_tplg_stream *stream = private;
+	__le64 format;
+
+	if (snd_config_get_id(cfg, &id) < 0)
+		return -EINVAL;
+
+	if (snd_config_get_string(cfg, &val) < 0)
+		return -EINVAL;
+
+	if (strcmp(id, "format") == 0) {
+		format = lookup_pcm_format(val);
+		if (format < 0) {
+			tplg_error("Unsupported stream format %s\n", val);
+			return -EINVAL;
+		}
+		
+		stream->format = format;
+		tplg_dbg("\t\t%s: %s\n", id, val);
+	} else if (strcmp(id, "rate") == 0) {
+		stream->rate = atoi(val);		
+		tplg_dbg("\t\t%s: %d\n", id, stream->rate);
+	} else if (strcmp(id, "channels") == 0) {
+		stream->channels = atoi(val);		
+		tplg_dbg("\t\t%s: %d\n", id, stream->channels);
+	} else if (strcmp(id, "tdm_slot") == 0) {
+		stream->tdm_slot = strtol(val, NULL, 16);
+		tplg_dbg("\t\t%s: 0x%x\n", id, stream->tdm_slot);
+	}
+
+	return 0;
+}
+
+/* Parse pcm configuration
+ *
+ * SectionPCMConfig."PCM config name" {
+ *
+ *	Playback {
+ *		format
+ *		rate
+ *		channels
+ *		tdm_slot
+ *	}
+ *
+ *	Capture {
+ *		format
+ *		rate
+ *		channels
+ *		tdm_slot
+ *	}
+ * }
+ */
+static int parse_pcm_config(struct soc_tplg_priv *soc_tplg,
+	snd_config_t *cfg, void *private)
+{
+	struct snd_soc_tplg_stream_config *sc;
+	struct soc_tplg_elem *elem;
+	snd_config_iterator_t i, next;
+	snd_config_t *n;
+	const char *id;
+	int err;
+
+	elem = elem_new();
+	if (!elem)
+		return -ENOMEM;
+
+	sc = calloc(1, sizeof(*sc));
+	if (!sc) {
+		free(elem);
+		return -ENOMEM;
+	}
+
+	list_add_tail(&elem->list, &soc_tplg->pcm_config_list);
+	snd_config_get_id(cfg, &id);
+	strncpy(elem->id, id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
+
+	elem->stream_cfg = sc;
+	elem->type = SND_SOC_TPLG_STREAM_CONFIG;
+	strncpy(sc->name, elem->id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);	
+
+	tplg_dbg(" PCM Config: %s\n", elem->id);
+
+	snd_config_for_each(i, next, cfg) {
+		n = snd_config_iterator_entry(i);
+		if (snd_config_get_id(n, &id) < 0)
+			continue;
+
+		/* skip comments */
+		if (strcmp(id, "Comment") == 0)
+			continue;
+		if (id[0] == '#')
+			continue;
+
+		if (strcmp(id, "Playback") == 0) {
+
+			tplg_dbg("\tPlayback\n");
+			err = parse_compound(soc_tplg, n, parse_stream,
+				&sc->playback);
+			if (err < 0)
+				return err;
+			continue;
+		}
+
+		if (strcmp(id, "Capture") == 0) {
+
+			tplg_dbg("\tCapture\n");
+			err = parse_compound(soc_tplg, n, parse_stream,
+				&sc->capture);
+			if (err < 0)
+				return err;
+			continue;
+		}
+	}
+
+	return 0;	
 }
 
 static int parse_routes(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg)
@@ -1394,6 +1546,13 @@ static int tplg_parse_config(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg)
 
 		if (strcmp(id, "SectionWidget") == 0) {
 			err = parse_compound(soc_tplg, n, parse_dapm_widget, NULL);
+			if (err < 0)
+				return err;
+			continue;
+		}
+
+		if (strcmp(id, "SectionPCMConfig") == 0) {
+			err = parse_compound(soc_tplg, n, parse_pcm_config, NULL);
 			if (err < 0)
 				return err;
 			continue;
