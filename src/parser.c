@@ -1284,6 +1284,28 @@ static int parse_pcm_config(struct soc_tplg_priv *soc_tplg,
 	return 0;
 }
 
+static int spit_format(struct snd_soc_tplg_stream_caps *caps, char *str)
+{
+	char *s = NULL;
+	__le64 format;
+	int i = 0;
+
+	s = strtok(str, ", ");
+	while ((s != NULL) && (i < SND_SOC_TPLG_MAX_FORMATS)) {
+		format = lookup_pcm_format(s);
+		if (format < 0) {
+			tplg_error("Unsupported stream format %s\n", s);
+			return -EINVAL;
+		}
+
+		caps->formats[i] = format;
+		s = strtok(NULL, ", ");
+		i++;
+	}
+
+	return 0;
+}
+
 /*
  * Parse a stream capabilities
  */
@@ -1292,6 +1314,8 @@ static int parse_caps(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg,
 {
 	const char *id, *val;
 	struct snd_soc_tplg_stream_caps *caps = private;
+	char *s;
+	int err;
 
 	caps->size = sizeof(*caps);
 
@@ -1301,10 +1325,17 @@ static int parse_caps(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg,
 	if (snd_config_get_string(cfg, &val) < 0)
 		return -EINVAL;
 
-	if (strcmp(id, "format") == 0) {
+	if (strcmp(id, "formats") == 0) {
+		s = strdup(val);
+		if (s == NULL)
+			return -ENOMEM;
 
-		/* jinyao: TODO split the format string */
+		err = spit_format(caps, s);
+		if (err < 0)
+			return err;
 
+		free(s);		
+		tplg_dbg("\t\t%s: %s\n", id, val);
 	} else if (strcmp(id, "rate_min") == 0) {
 		caps->rate_min = atoi(val);
 		tplg_dbg("\t\t%s: %d\n", id, caps->rate_min);
