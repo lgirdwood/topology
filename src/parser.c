@@ -1286,6 +1286,7 @@ static int parse_pcm_config(struct soc_tplg_priv *soc_tplg,
 	return 0;
 }
 
+#if 0
 static int split_format(struct snd_soc_tplg_stream_caps *caps, char *str)
 {
 	char *s = NULL;
@@ -1307,6 +1308,7 @@ static int split_format(struct snd_soc_tplg_stream_caps *caps, char *str)
 
 	return 0;
 }
+
 
 /*
  * Parse a stream capabilities
@@ -1354,6 +1356,27 @@ static int parse_caps(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg,
 
 	return 0;
 }
+
+/*
+ * Stream Capabilities
+ */
+struct snd_soc_tplg_stream_caps {
+	__le32 size;		/* in bytes of this structure */
+	char name[SNDRV_CTL_ELEM_ID_NAME_MAXLEN];
+	__le64 formats[SND_SOC_TPLG_MAX_FORMATS];	/* supported formats SNDRV_PCM_FMTBIT_* */
+	__le32 rates;		/* supported rates SNDRV_PCM_RATE_* */
+	__le32 rate_min;	/* min rate */
+	__le32 rate_max;	/* max rate */
+	__le32 channels_min;	/* min channels */
+	__le32 channels_max;	/* max channels */
+	__le32 periods_min;	/* min number of periods */
+	__le32 periods_max;	/* max number of periods */
+	__le32 period_size_min;	/* min period size bytes */
+	__le32 period_size_max;	/* max period size bytes */
+	__le32 buffer_size_min;	/* min buffer size bytes */
+	__le32 buffer_size_max;	/* max buffer size bytes */ 
+} __attribute__((packed));
+
 
 /* Parse pcm Capabilities
  *
@@ -1493,6 +1516,18 @@ static int parse_pcm_cap_config(struct soc_tplg_priv *soc_tplg, snd_config_t *cf
 	return 0;
 }
 
+struct snd_soc_tplg_pcm_dai {
+	__le32 size;		/* in bytes of this structure */
+	char name[SNDRV_CTL_ELEM_ID_NAME_MAXLEN];
+	__le32 id;			/* unique ID - used to match */
+	__le32 playback;		/* supports playback mode */
+	__le32 capture;			/* supports capture mode */
+	__le32 compress;		/* 1 = compressed; 0 = PCM */
+	__le32 num_configs;		/* number of configs */
+	struct snd_soc_tplg_stream_caps caps[2];	/* capabilities */
+	struct snd_soc_tplg_stream_config config[0];	/* supported SW/FW configs */
+}__attribute__((packed));
+
 /* Parse pcm
  *
  * SectionPCM."System Pin" {
@@ -1605,6 +1640,7 @@ static int parse_pcm(struct soc_tplg_priv *soc_tplg,
 
 	return 0;
 }
+#endif
 
 static int parse_routes(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg)
 {
@@ -1897,7 +1933,7 @@ static int tplg_parse_config(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg)
 				return err;
 			continue;
 		}
-
+#if 0
 		if (strcmp(id, "SectionPCMCapabilities") == 0) {
 			err = parse_compound(soc_tplg, n, parse_pcm_caps, NULL);
 			if (err < 0)
@@ -1911,7 +1947,7 @@ static int tplg_parse_config(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg)
 				return err;
 			continue;
 		}
-
+#endif
 		if (strcmp(id, "SectionGraph") == 0) {
 			err = parse_compound(soc_tplg, n, parse_dapm_graph, NULL);
 			if (err < 0)
