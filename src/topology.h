@@ -56,7 +56,8 @@ enum {
 	SND_SOC_TPLG_DATA,
 	SND_SOC_TPLG_BYTES_EXT,
 	SND_SOC_TPLG_STREAM_CONFIG,
-	SND_SOC_TPLG_STREAM_CAPS
+	SND_SOC_TPLG_STREAM_CAPS,
+	SND_SOC_TPLG_PCM_INFO
 };
 
 #define CHUNK_SIZE 	4096
@@ -92,6 +93,7 @@ struct soc_tplg_priv {
 	struct list_head pdata_list;
 	struct list_head pcm_config_list;
 	struct list_head pcm_caps_list;
+	struct list_head pcm_info_list;
 };
 
 struct soc_tplg_elem {
@@ -123,6 +125,7 @@ struct soc_tplg_elem {
 		struct snd_soc_tplg_private *data;
 		struct snd_soc_tplg_stream_config *stream_cfg;
 		struct snd_soc_tplg_stream_caps *stream_caps;
+		struct snd_soc_tplg_pcm_info *pcm_info;
 	};
 
 	/* an element may refer to other elements:

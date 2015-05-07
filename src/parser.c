@@ -215,6 +215,7 @@ struct soc_tplg_priv *socfw_new(const char *name, int verbose)
 	INIT_LIST_HEAD(&soc_tplg->text_list);
 	INIT_LIST_HEAD(&soc_tplg->pcm_config_list);
 	INIT_LIST_HEAD(&soc_tplg->pcm_caps_list);
+	INIT_LIST_HEAD(&soc_tplg->pcm_info_list);
 
 	return soc_tplg;
 }
@@ -234,6 +235,7 @@ void socfw_free(struct soc_tplg_priv *soc_tplg)
 	free_elem_list(&soc_tplg->text_list);
 	free_elem_list(&soc_tplg->pcm_config_list);
 	free_elem_list(&soc_tplg->pcm_caps_list);
+	free_elem_list(&soc_tplg->pcm_info_list);
 	
 	free(soc_tplg);
 }
@@ -1068,7 +1070,7 @@ static int parse_dapm_widget(struct soc_tplg_priv *soc_tplg,
 
 	widget = calloc(1, sizeof(*widget));
 	if (!widget) {
-		free(widget);
+		free(elem);
 		return -ENOMEM;
 	}
 
@@ -1284,13 +1286,13 @@ static int parse_pcm_config(struct soc_tplg_priv *soc_tplg,
 	return 0;
 }
 
-static int spit_format(struct snd_soc_tplg_stream_caps *caps, char *str)
+static int split_format(struct snd_soc_tplg_stream_caps *caps, char *str)
 {
 	char *s = NULL;
 	__le64 format;
 	int i = 0;
 
-	s = strtok(str, ", ");
+	s = strtok(str, ",");
 	while ((s != NULL) && (i < SND_SOC_TPLG_MAX_FORMATS)) {
 		format = lookup_pcm_format(s);
 		if (format < 0) {
@@ -1330,7 +1332,7 @@ static int parse_caps(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg,
 		if (s == NULL)
 			return -ENOMEM;
 
-		err = spit_format(caps, s);
+		err = split_format(caps, s);
 		if (err < 0)
 			return err;
 
@@ -1419,6 +1421,189 @@ static int parse_pcm_caps(struct soc_tplg_priv *soc_tplg,
 	}
 
 	return 0;	
+}
+
+struct snd_soc_tplg_pcm_cap_config_priv {
+	struct snd_soc_tplg_pcm_cap_config *cc;
+	struct soc_tplg_elem *elem;
+};
+
+static int split_config(struct snd_soc_tplg_pcm_cap_config *cc, char *str,
+	struct soc_tplg_elem *elem)
+{
+	char *s;
+	int err, i = 0;
+
+	s = strtok(str, ",");
+	while ((s != NULL) && (i < SND_SOC_TPLG_MAX_CONFIG)) {
+		strncpy(cc->config_names[i], s, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
+
+		err = add_ref(elem, s);
+		if (err < 0)
+			return err;
+
+		tplg_dbg("\t\tConfig: %s\n", cc->config_names[i]);
+		s = strtok(NULL, ",");
+		i++;
+	}
+
+	cc->config_num = i;
+	
+	return 0;
+}
+
+/*
+ * Parse PCM capabilities and configs
+ */
+static int parse_pcm_cap_config(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg,
+	void *private)
+{
+	const char *id, *val;
+	struct snd_soc_tplg_pcm_cap_config_priv *priv = private;
+	struct snd_soc_tplg_pcm_cap_config *cc = priv->cc;
+	struct soc_tplg_elem *elem = priv->elem;
+	int err = 0;
+	char *s;
+
+	if (snd_config_get_id(cfg, &id) < 0)
+		return -EINVAL;
+
+	if (snd_config_get_string(cfg, &val) < 0)
+		return -EINVAL;
+
+	if (strcmp(id, "Capabilities") == 0) {
+		strncpy(cc->caps_name, val, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
+		err = add_ref(elem, val);
+		if (err < 0)
+			return err;
+
+		tplg_dbg("\t\t%s: %s\n", id, val);
+	} else if (strcmp(id, "Config") == 0) {
+		s = strdup(val);
+		if (s == NULL)
+			return -ENOMEM;
+
+		err = split_config(cc, s, elem);
+		free(s);
+
+		if (err < 0)
+			return err;
+	}
+
+	return 0;
+}
+
+/* Parse pcm
+ *
+ * SectionPCM."System Pin" {
+ *
+ *	Index "1"
+ *
+ *	# used for binding to the PCM
+ *	ID "0"
+ *
+ *	Playback {
+ *		Capabilities "System Playback"
+ *		Config "PCM 48k Stereo 24bit"
+ *		Config "PCM 48k Stereo 16bit"
+ *	}
+ *
+ *	Capture {
+ *		Capabilities "Analog Capture"
+ *		Config "PCM 48k Stereo 24bit"
+ *		Config "PCM 48k Stereo 16bit"
+ *		Config "PCM 48k 2P/4C 16bit"
+ *	}
+ * }
+ */
+static int parse_pcm(struct soc_tplg_priv *soc_tplg,
+	snd_config_t *cfg, void *private)
+{
+	struct snd_soc_tplg_pcm_info *pcm;
+	struct soc_tplg_elem *elem;
+	snd_config_iterator_t i, next;
+	snd_config_t *n;
+	const char *id, *val = NULL;
+	int err;
+	struct snd_soc_tplg_pcm_cap_config_priv priv;
+
+	elem = elem_new();
+	if (!elem)
+		return -ENOMEM;
+
+	pcm = calloc(1, sizeof(*pcm));
+	if (!pcm) {
+		free(elem);
+		return -ENOMEM;
+	}
+
+	list_add_tail(&elem->list, &soc_tplg->pcm_info_list);
+	snd_config_get_id(cfg, &id);
+	strncpy(elem->id, id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
+
+	elem->pcm_info = pcm;
+	elem->type = SND_SOC_TPLG_PCM_INFO;
+	strncpy(pcm->name, elem->id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
+	pcm->size = sizeof(*pcm);
+	priv.elem = elem;
+
+	tplg_dbg(" PCM: %s\n", elem->id);
+
+	snd_config_for_each(i, next, cfg) {
+		n = snd_config_iterator_entry(i);
+		if (snd_config_get_id(n, &id) < 0)
+			continue;
+
+		/* skip comments */
+		if (strcmp(id, "Comment") == 0)
+			continue;
+		if (id[0] == '#')
+			continue;
+
+		if (strcmp(id, "Index") == 0) {
+			if (snd_config_get_string(n, &val) < 0)
+				return -EINVAL;
+
+			pcm->index = atoi(val);
+			tplg_dbg("\t%s: %d\n", id, pcm->index);
+			continue;
+		}
+
+		if (strcmp(id, "ID") == 0) {
+			if (snd_config_get_string(n, &val) < 0)
+				return -EINVAL;
+
+			pcm->id = atoi(val);
+			tplg_dbg("\t%s: %d\n", id, pcm->id);
+			continue;
+		}
+
+		if (strcmp(id, "Playback") == 0) {
+
+			tplg_dbg("\tPlayback\n");
+			
+			priv.cc = &pcm->playback;
+			err = parse_compound(soc_tplg, n, parse_pcm_cap_config,
+				&priv);
+			if (err < 0)
+				return err;
+			continue;
+		}
+
+		if (strcmp(id, "Capture") == 0) {
+
+			tplg_dbg("\tCapture\n");
+
+			priv.cc = &pcm->capture;
+			err = parse_compound(soc_tplg, n, parse_pcm_cap_config,
+				&priv);
+			if (err < 0)
+				return err;
+			continue;
+		}
+	}
+
+	return 0;
 }
 
 static int parse_routes(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg)
@@ -1715,6 +1900,13 @@ static int tplg_parse_config(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg)
 
 		if (strcmp(id, "SectionPCMCapabilities") == 0) {
 			err = parse_compound(soc_tplg, n, parse_pcm_caps, NULL);
+			if (err < 0)
+				return err;
+			continue;
+		}
+
+		if (strcmp(id, "SectionPCM") == 0) {
+			err = parse_compound(soc_tplg, n, parse_pcm, NULL);
 			if (err < 0)
 				return err;
 			continue;
