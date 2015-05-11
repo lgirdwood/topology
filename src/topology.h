@@ -115,7 +115,7 @@ struct soc_tplg_elem {
 		struct snd_soc_tplg_ctl_tlv *tlv;
 		struct snd_soc_tplg_mixer_control *mixer_ctrl;
 		struct snd_soc_tplg_enum_control *enum_ctrl;
-		struct snd_soc_tplg_bytes_ext *bytes_ext;
+		struct snd_soc_tplg_bytes_control *bytes_ext;
 		struct snd_soc_tplg_dapm_widget *widget;
 		struct snd_soc_tplg_pcm_dai *pcm;
 		struct snd_soc_tplg_pcm_dai *be;

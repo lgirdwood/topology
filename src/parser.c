@@ -537,7 +537,6 @@ static int parse_ops(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg,
 	snd_config_t *n;
 	struct snd_soc_tplg_ctl_hdr *hdr = private;
 	const char *id, *value;
-	unsigned int info = 0, get = 0, put = 0;
 
 	tplg_dbg("\tOps\n");
 	hdr->size = sizeof(*hdr);
@@ -550,28 +549,27 @@ static int parse_ops(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg,
 		if (snd_config_get_id(n, &id) < 0)
 			continue;
 
-		/* get value */
+		/* get value - try strings then ints */
 		if (snd_config_get_string(n, &value) < 0)
 			continue;
 
 		if (strcmp(id, "info") == 0) {
-			info = lookup_ops(value);
-			if (info < 0)
-				info = atoi(value);
+			hdr->ops.info = lookup_ops(value);
+			if (hdr->ops.info < 0)
+				hdr->ops.info = atoi(value);
 		} else if (strcmp(id, "get") == 0) {
-			put = lookup_ops(value);
-			if (put < 0)
-			put = atoi(value);
+			hdr->ops.put = lookup_ops(value);
+			if (hdr->ops.put < 0)
+				hdr->ops.put = atoi(value);
 		} else if (strcmp(id, "put") == 0) {
-			get = lookup_ops(value);
-			if (get < 0)
-				get = atoi(value);
+			hdr->ops.get = lookup_ops(value);
+			if (hdr->ops.get < 0)
+				hdr->ops.get = atoi(value);
 		}
 
 		tplg_dbg("\t\t%s = %s\n", id, value);
 	}
 
-	hdr->type = SND_SOC_TPLG_CTL_SID(get, put, info);
 	return 0;
 }
 
@@ -703,7 +701,7 @@ static int parse_tlv(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg,
 static int parse_control_bytes(struct soc_tplg_priv *soc_tplg,
 	snd_config_t *cfg, void *private)
 {
-	struct snd_soc_tplg_bytes_ext *be;
+	struct snd_soc_tplg_bytes_control *be;
 	struct soc_tplg_elem *elem;
 	snd_config_iterator_t i, next;
 	snd_config_t *n;
@@ -725,7 +723,7 @@ static int parse_control_bytes(struct soc_tplg_priv *soc_tplg,
 	strncpy(elem->id, id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
 
 	elem->bytes_ext = be;
-	elem->type = SND_SOC_TPLG_BYTES;
+	elem->type = SND_SOC_TPLG_TYPE_BYTES;
 	strncpy(be->hdr.name, elem->id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
 	be->size = sizeof(*be);
 
@@ -750,8 +748,8 @@ static int parse_control_bytes(struct soc_tplg_priv *soc_tplg,
 			if (snd_config_get_string(n, &val) < 0)
 				return -EINVAL;
 
-			be->hdr.index = atoi(val);
-			tplg_dbg("\t%s: %d\n", id, be->hdr.index);
+			//be->hdr.id = atoi(val);
+			//tplg_dbg("\t%s: %d\n", id, be->hdr.index);
 			continue;
 		}
 
@@ -835,7 +833,7 @@ static int parse_control_enum(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg,
 
 	/* init new mixer */	
 	elem->enum_ctrl = ec;
-	elem->type = SND_SOC_TPLG_ENUM;
+	elem->type = SND_SOC_TPLG_TYPE_ENUM;
 	strncpy(ec->hdr.name, elem->id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);	
 	ec->hdr.access = SNDRV_CTL_ELEM_ACCESS_TLV_READ |
 		SNDRV_CTL_ELEM_ACCESS_READWRITE;
@@ -863,8 +861,8 @@ static int parse_control_enum(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg,
 			if (snd_config_get_string(n, &val) < 0)
 				return -EINVAL;
 
-			ec->hdr.index = atoi(val);
-			tplg_dbg("\t%s: %d\n", id, ec->hdr.index);
+			//ec->hdr.id = atoi(val);
+			//tplg_dbg("\t%s: %d\n", id, ec->hdr.index);
 			continue;
 		}
 
@@ -955,7 +953,7 @@ static int parse_control_mixer(struct soc_tplg_priv *soc_tplg,
 
 	/* init new mixer */	
 	elem->mixer_ctrl = mc;
-	elem->type = SND_SOC_TPLG_MIXER;
+	elem->type = SND_SOC_TPLG_TYPE_MIXER;
 	strncpy(mc->hdr.name, elem->id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);	
 	mc->hdr.access = SNDRV_CTL_ELEM_ACCESS_TLV_READ |
 		SNDRV_CTL_ELEM_ACCESS_READWRITE;
@@ -983,8 +981,8 @@ static int parse_control_mixer(struct soc_tplg_priv *soc_tplg,
 			if (snd_config_get_string(n, &val) < 0)
 				return -EINVAL;
 
-			elem->index = atoi(val);
-			tplg_dbg("\t%s: %d\n", id, mc->hdr.index);
+			//elem->id = atoi(val);
+			//tplg_dbg("\t%s: %d\n", id, mc->hdr.index);
 			continue;
 		}
 
@@ -1080,7 +1078,7 @@ static int parse_dapm_widget(struct soc_tplg_priv *soc_tplg,
 	strncpy(elem->id, id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
 
 	elem->widget = widget;
-	elem->type = SND_SOC_TPLG_DAPM_WIDGET;
+	elem->type = SND_SOC_TPLG_TYPE_DAPM_WIDGET;
 	strncpy(widget->name, elem->id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
 	widget->size = sizeof(*widget);
 
@@ -1101,8 +1099,8 @@ static int parse_dapm_widget(struct soc_tplg_priv *soc_tplg,
 			if (snd_config_get_string(n, &val) < 0)
 				return -EINVAL;
 
-			widget->index = atoi(val);
-			tplg_dbg("\t%s: %d\n", id, widget->index);
+			//widget->id = atoi(val);
+			//tplg_dbg("\t%s: %d\n", id, widget->index);
 			continue;
 		}
 
@@ -1666,7 +1664,7 @@ static int parse_routes(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg)
 				return -ENOMEM;
 			list_add_tail(&elem->list, &soc_tplg->route_list);
 			strcpy(elem->id, "route");
-			elem->type = SND_SOC_TPLG_DAPM_GRAPH;
+			elem->type = SND_SOC_TPLG_TYPE_DAPM_GRAPH;
 
 			route= calloc(1, sizeof(*route));
 			if (!route)
@@ -1800,7 +1798,7 @@ static int parse_pcm_dai(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg,
 	if (!pcm_dai)
 		return -ENOMEM;
 	elem->pcm = pcm_dai;
-	elem->type = SND_SOC_TPLG_PCM;
+	elem->type = SND_SOC_TPLG_TYPE_PCM;
 	pcm_dai->size = sizeof(pcm_dai);
 
 	printf("find pcm_dai '%s'\n", elem->id);
@@ -2134,7 +2132,7 @@ static int check_widgets(struct soc_tplg_priv *soc_tplg)
 	list_for_each_safe(pos, npos, base) {
 
 		elem = list_entry(pos, soc_tplg_elem_t, list);
-		if (!elem->widget|| elem->type != SND_SOC_TPLG_DAPM_WIDGET) {
+		if (!elem->widget|| elem->type != SND_SOC_TPLG_TYPE_DAPM_WIDGET) {
 			tplg_error("Invalid widget '%s'\n", elem->id);
 			return -EINVAL;
 		}

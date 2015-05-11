@@ -78,25 +78,25 @@ static int write_elem(struct soc_tplg_priv *soc_tplg, soc_tplg_elem_t *elem)
 {
 	/* TODO: add all objects */
 	switch (elem->type) {
-	case SND_SOC_TPLG_MIXER:
+	case SND_SOC_TPLG_TYPE_MIXER:
 
 		/* TODO: write kcontrol header */
 
 		/* TODO: check for enum and byte mixers */
 		return write(soc_tplg->out_fd, elem->mixer_ctrl,
 			sizeof(*elem->mixer_ctrl));
-	case SND_SOC_TPLG_BYTES:
-	case SND_SOC_TPLG_ENUM:
-	case SND_SOC_TPLG_DAPM_GRAPH:
+	case SND_SOC_TPLG_TYPE_BYTES:
+	case SND_SOC_TPLG_TYPE_ENUM:
+	case SND_SOC_TPLG_TYPE_DAPM_GRAPH:
 		return write(soc_tplg->out_fd, elem->route,
 			sizeof(*elem->route));
-	case SND_SOC_TPLG_DAPM_WIDGET:
+	case SND_SOC_TPLG_TYPE_DAPM_WIDGET:
 		return write(soc_tplg->out_fd, elem->widget,
 			sizeof(*elem->widget));
-	case SND_SOC_TPLG_DAI_LINK:
-	case SND_SOC_TPLG_PCM:
-	case SND_SOC_TPLG_MANIFEST:
-	case SND_SOC_TPLG_CODEC_LINK:
+	case SND_SOC_TPLG_TYPE_DAI_LINK:
+	case SND_SOC_TPLG_TYPE_PCM:
+	case SND_SOC_TPLG_TYPE_MANIFEST:
+	case SND_SOC_TPLG_TYPE_CODEC_LINK:
 	default:
 		return -EINVAL;
 	}
