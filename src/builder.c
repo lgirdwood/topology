@@ -32,7 +32,7 @@ static void verbose(struct soc_tplg_priv *soc_tplg, const char *fmt, ...)
 }
 
 /* write out block header to output file */
-static int write_header(struct soc_tplg_priv *soc_tplg, u32 type,
+static int write_block_header(struct soc_tplg_priv *soc_tplg, u32 type,
 	u32 vendor_type, u32 version, u32 id, size_t payload_size)
 {
 	struct snd_soc_tplg_hdr hdr;
@@ -74,64 +74,71 @@ static int write_header(struct soc_tplg_priv *soc_tplg, u32 type,
 	return 0;
 }
 
-static int write_elem(struct soc_tplg_priv *soc_tplg, struct soc_tplg_elem *elem)
+static int write_mixer(struct soc_tplg_priv *soc_tplg,
+	struct snd_soc_tplg_mixer_control *mixer, int size)
 {
-	/* TODO: add all objects */
-	switch (elem->type) {
-	case SND_SOC_TPLG_TYPE_MIXER:
+	int ret;
 
-		/* TODO: write kcontrol header */
-
-		/* TODO: check for enum and byte mixers */
-		return write(soc_tplg->out_fd, elem->mixer_ctrl,
-			sizeof(*elem->mixer_ctrl));
-	case SND_SOC_TPLG_TYPE_BYTES:
-	case SND_SOC_TPLG_TYPE_ENUM:
-	case SND_SOC_TPLG_TYPE_DAPM_GRAPH:
-		return write(soc_tplg->out_fd, elem->route,
-			sizeof(*elem->route));
-	case SND_SOC_TPLG_TYPE_DAPM_WIDGET:
-		return write(soc_tplg->out_fd, elem->widget,
-			sizeof(*elem->widget));
-	case SND_SOC_TPLG_TYPE_DAI_LINK:
-	case SND_SOC_TPLG_TYPE_PCM:
-	case SND_SOC_TPLG_TYPE_MANIFEST:
-	case SND_SOC_TPLG_TYPE_CODEC_LINK:
-	default:
-		return -EINVAL;
+	/* write the header for this block */
+	ret = write_block_header(soc_tplg, 0, 0, 0, 0, size);
+	if (ret < 0) {
+		//tplg_error("failed to write control elems %d\n", ret);
+		return ret;
 	}
 
+	// for each elem write
+
 	return 0;
 }
 
-static int calc_elem_payload_size(struct soc_tplg_priv *soc_tplg,
+static int write_graph(struct soc_tplg_priv *soc_tplg,
+	struct snd_soc_tplg_dapm_graph_elem *route, int size)
+{
+	
+
+	return 0;
+}
+
+static int write_widget(struct soc_tplg_priv *soc_tplg,
+	struct snd_soc_tplg_dapm_widget *widget, int size)
+{
+	
+
+	return 0;
+}
+
+static int calc_block_size(struct soc_tplg_priv *soc_tplg,
 	struct soc_tplg_elem *elem)
 {
+	// for each elem in this block
+	// calc object size and add to block total
 	return 0;
 }
 
-static int write_elems(struct soc_tplg_priv *soc_tplg, struct list_head *base)
+static int write_block(struct soc_tplg_priv *soc_tplg, struct list_head *base)
 {
-	struct list_head *pos, *npos;
 	struct soc_tplg_elem *elem;
-	int ret, size, hdr = 0;
+	int size;
 
-	size = calc_elem_payload_size(soc_tplg, elem);
-	
-	/* write elements */
-	list_for_each_safe(pos, npos, base) {
+	/* calculate the block size in bytes for all elems */
+	size = calc_block_size(soc_tplg, elem);
+	if (size == 0)
+		return 0;
 
-		elem = list_entry(pos, struct soc_tplg_elem, list);
-
-		/* only write block header once */
-		if (!hdr) {
-			ret = write_header(soc_tplg, elem->type, 0, 0, 0, size);
-			hdr = 1;
-		}
-
-		ret = write_elem(soc_tplg, elem);
-		if (ret < 0)
-			return ret;
+	/* write each elem for this block */
+	/* TODO: add all objects */
+	switch (elem->type) {
+	case PARSER_TYPE_MIXER:
+		return write_mixer(soc_tplg, elem->mixer_ctrl, size);
+	case PARSER_TYPE_BYTES:
+	case PARSER_TYPE_ENUM:
+	case PARSER_TYPE_DAPM_GRAPH:
+		return write_graph(soc_tplg, elem->route, size);
+	case PARSER_TYPE_DAPM_WIDGET:
+		return write_widget(soc_tplg, elem->widget, size);
+	case PARSER_TYPE_PCM:
+	default:
+		return -EINVAL;
 	}
 
 	return 0;
@@ -142,21 +149,21 @@ int socfw_write_data(struct soc_tplg_priv *soc_tplg)
 	int ret;
 
 	/* write control elems */
-	ret = write_elems(soc_tplg, &soc_tplg->control_list);
+	ret = write_block(soc_tplg, &soc_tplg->control_list);
 	if (ret < 0) {
 		//tplg_error("failed to write control elems %d\n", ret);
 		return ret;
 	}
 	
 	/* write widget elems */
-	ret = write_elems(soc_tplg, &soc_tplg->widget_list);
+	ret = write_block(soc_tplg, &soc_tplg->widget_list);
 	if (ret < 0) {
 		//tplg_error("failed to write widget elems %d\n", ret);
 		return ret;
 	}
 
 	/* write route elems */
-	ret = write_elems(soc_tplg, &soc_tplg->route_list);
+	ret = write_block(soc_tplg, &soc_tplg->route_list);
 	if (ret < 0) {
 		//tplg_error("failed to write graph elems %d\n", ret);
 		return ret;
@@ -188,7 +195,7 @@ int socfw_import_vendor(struct soc_tplg_priv *soc_tplg, const char *name,
 
 	verbose(soc_tplg, " vendor: file size is %d bytes\n", size);
 
-	err = write_header(soc_tplg, type, 0, 0, 0, size);
+	err = write_block_header(soc_tplg, type, 0, 0, 0, size);
 	if (err < 0)
 		return err;
 

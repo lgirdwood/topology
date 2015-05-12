@@ -104,7 +104,7 @@ struct soc_tplg_priv {
 /* object text references */
 struct soc_tplg_ref {
 	u32 type;
-	struct soc_tplg_elem *elem;	/* element this ID maps to */
+	struct soc_tplg_elem *elem;
 	char id[SNDRV_CTL_ELEM_ID_NAME_MAXLEN];
 	struct list_head list;
 };
@@ -119,6 +119,9 @@ struct soc_tplg_elem {
 	
 	int index;
 	enum parser_type type;
+
+	// TODO: calc size for each object 
+	int size; /* size of this object */
 
 	/* UAPI object for this elem */
 	union {

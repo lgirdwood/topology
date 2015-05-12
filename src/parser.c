@@ -2083,22 +2083,23 @@ static int check_referenced_tlv(struct soc_tplg_priv *soc_tplg,
 
 	base = &elem->ref_list;
 
+	/* for each ref in this control elem */
 	list_for_each_safe(pos, npos, base) {
 
 		ref = list_entry(pos, struct soc_tplg_ref, list);
-		if (ref->id && !ref->elem) {
+		if (ref->id == NULL || ref->elem)
+			continue;
 
-			ref->elem = lookup_element(&soc_tplg->tlv_list,
-				ref->id, PARSER_TYPE_TLV);
-			if (!ref->elem) {
-				tplg_error("Cannot find tlv '%s' referenced by"
-					" control '%s'\n", ref->id, elem->id);
-				return -EINVAL;
-			}
-
-			/* attach TLV to kcontrol */
-			//elem->tlv_ref = ref
+		/* see if ref is a TLV */
+		ref->elem = lookup_element(&soc_tplg->tlv_list,
+			ref->id, PARSER_TYPE_TLV);
+		if (!ref->elem) {
+			tplg_error("Cannot find tlv '%s' referenced by"
+				" control '%s'\n", ref->id, elem->id);
+			return -EINVAL;
 		}
+
+		return 0;
 	}
 
 	return 0;
