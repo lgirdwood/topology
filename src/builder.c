@@ -74,7 +74,7 @@ static int write_header(struct soc_tplg_priv *soc_tplg, u32 type,
 	return 0;
 }
 
-static int write_elem(struct soc_tplg_priv *soc_tplg, soc_tplg_elem_t *elem)
+static int write_elem(struct soc_tplg_priv *soc_tplg, struct soc_tplg_elem *elem)
 {
 	/* TODO: add all objects */
 	switch (elem->type) {
@@ -105,7 +105,7 @@ static int write_elem(struct soc_tplg_priv *soc_tplg, soc_tplg_elem_t *elem)
 }
 
 static int calc_elem_payload_size(struct soc_tplg_priv *soc_tplg,
-	soc_tplg_elem_t *elem)
+	struct soc_tplg_elem *elem)
 {
 	return 0;
 }
@@ -113,7 +113,7 @@ static int calc_elem_payload_size(struct soc_tplg_priv *soc_tplg,
 static int write_elems(struct soc_tplg_priv *soc_tplg, struct list_head *base)
 {
 	struct list_head *pos, *npos;
-	soc_tplg_elem_t *elem;
+	struct soc_tplg_elem *elem;
 	int ret, size, hdr = 0;
 
 	size = calc_elem_payload_size(soc_tplg, elem);
@@ -121,7 +121,7 @@ static int write_elems(struct soc_tplg_priv *soc_tplg, struct list_head *base)
 	/* write elements */
 	list_for_each_safe(pos, npos, base) {
 
-		elem = list_entry(pos, soc_tplg_elem_t, list);
+		elem = list_entry(pos, struct soc_tplg_elem, list);
 
 		/* only write block header once */
 		if (!hdr) {

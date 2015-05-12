@@ -48,16 +48,22 @@ typedef	int16_t s16;
 typedef	uint8_t u8;
 typedef	int8_t s8;
 
+struct soc_tplg_ref;
+struct soc_tplg_elem;
+
 /* internal topology type not used by kernel */
-enum {
-	SND_SOC_TPLG_TLV = (SND_SOC_TPLG_TYPE_MAX + 1),
-	SND_SOC_TPLG_MIXER_ARRAY,
-	SND_SOC_TPLG_TEXT,
-	SND_SOC_TPLG_DATA,
-	SND_SOC_TPLG_BYTES_EXT,
-	SND_SOC_TPLG_STREAM_CONFIG,
-	SND_SOC_TPLG_STREAM_CAPS,
-	SND_SOC_TPLG_PCM_INFO
+enum parser_type {
+	PARSER_TYPE_TLV = 0,
+	PARSER_TYPE_MIXER,
+	PARSER_TYPE_ENUM,
+	PARSER_TYPE_TEXT,
+	PARSER_TYPE_DATA,
+	PARSER_TYPE_BYTES,
+	PARSER_TYPE_STREAM_CONFIG,
+	PARSER_TYPE_STREAM_CAPS,
+	PARSER_TYPE_PCM,
+	PARSER_TYPE_DAPM_WIDGET,
+	PARSER_TYPE_DAPM_GRAPH,
 };
 
 #define CHUNK_SIZE 	4096
@@ -74,14 +80,13 @@ struct soc_tplg_priv {
 	int out_fd;
 
 	int verbose;
-
 	u32 version;
 
 	/* runtime state */
 	u32 next_hdr_pos;
 	int index;
 
-	/* for text format topology */
+	/* list of each element type */
 	struct list_head tlv_list;
 	struct list_head control_list;
 	struct list_head widget_list;
@@ -96,19 +101,24 @@ struct soc_tplg_priv {
 	struct list_head pcm_info_list;
 };
 
-struct soc_tplg_elem {
+/* object text references */
+struct soc_tplg_ref {
+	u32 type;
+	struct soc_tplg_elem *elem;	/* element this ID maps to */
+	char id[SNDRV_CTL_ELEM_ID_NAME_MAXLEN];
 	struct list_head list;
+};
+
+struct soc_tplg_elem {
+
 	char id[SNDRV_CTL_ELEM_ID_NAME_MAXLEN];
 
 	/* storage for textsand data if this is text or data elem*/
 	char texts[SND_SOC_TPLG_NUM_TEXTS][SNDRV_CTL_ELEM_ID_NAME_MAXLEN];
 	unsigned int values[SND_SOC_TPLG_NUM_TEXTS * SNDRV_CTL_ELEM_ID_NAME_MAXLEN / 4];
-
-	/* text and data sections this lement references */
-	char data_ref[SNDRV_CTL_ELEM_ID_NAME_MAXLEN];
-	char text_ref[SNDRV_CTL_ELEM_ID_NAME_MAXLEN];
+	
 	int index;
-	u32 type;
+	enum parser_type type;
 
 	/* UAPI object for this elem */
 	union {
@@ -134,17 +144,8 @@ struct soc_tplg_elem {
 	 * a graph may refer to some widgets.
 	 */
 	struct list_head ref_list;
+	struct list_head list; /* list of all elements with same type */
 };
-
-typedef struct soc_tplg_elem soc_tplg_elem_t;
-
-struct soc_tplg_ref {
-	struct list_head list;
-	char id[SNDRV_CTL_ELEM_ID_NAME_MAXLEN];
-	u32 type;
-	soc_tplg_elem_t *elem;
-};
-typedef struct soc_tplg_ref  soc_tplg_ref_t;
 
 int socfw_write_data(struct soc_tplg_priv *soc_tplg);
 

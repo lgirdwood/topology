@@ -125,15 +125,18 @@ static void tplg_error(const char *fmt, ...)
 	va_end(va);
 }
 
-static inline int add_ref(soc_tplg_elem_t *elem, const char* ref_id)
+static inline int add_ref(struct soc_tplg_elem *elem, int type,
+	const char* id)
 {
-	soc_tplg_ref_t *ref;
+	struct soc_tplg_ref *ref;
 
 	ref = calloc(1, sizeof(*ref));
 	if (!ref)
 		return -ENOMEM;
 
-	strncpy(ref->id, ref_id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
+	strncpy(ref->id, id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
+	ref->type = type;
+
 	list_add_tail(&ref->list, &elem->ref_list);
 	return 0;
 }
@@ -141,19 +144,19 @@ static inline int add_ref(soc_tplg_elem_t *elem, const char* ref_id)
 static void free_ref_list(struct list_head *base)
 {
 	struct list_head *pos, *npos;
-	soc_tplg_ref_t *ref;
+	struct soc_tplg_ref *ref;
 
 	list_for_each_safe(pos, npos, base) {
-		ref = list_entry(pos, soc_tplg_ref_t, list);
+		ref = list_entry(pos, struct soc_tplg_ref, list);
 		printf("\tfree ref %s\n", ref->id);
 		list_del(&ref->list);
 		free(ref);
 	}
 }
 
-static soc_tplg_elem_t *elem_new(void)
+static struct soc_tplg_elem *elem_new(void)
 {
-	soc_tplg_elem_t *elem;
+	struct soc_tplg_elem *elem;
 
 	elem = calloc(1, sizeof(*elem));
 	if (!elem)
@@ -163,7 +166,7 @@ static soc_tplg_elem_t *elem_new(void)
 	return elem;
 }
 
-static void elem_free(soc_tplg_elem_t *elem)
+static void elem_free(struct soc_tplg_elem *elem)
 {
 	printf("free element %s\n", elem->id);
 	free_ref_list(&elem->ref_list);
@@ -173,10 +176,10 @@ static void elem_free(soc_tplg_elem_t *elem)
 static void free_elem_list(struct list_head *base)
 {
 	struct list_head *pos, *npos;
-	soc_tplg_elem_t *elem;
+	struct soc_tplg_elem *elem;
 
 	list_for_each_safe(pos, npos, base) {
-		elem = list_entry(pos, soc_tplg_elem_t, list);
+		elem = list_entry(pos, struct soc_tplg_elem, list);
 		list_del(&elem->list);
 		elem_free(elem);
 	}
@@ -240,17 +243,17 @@ void socfw_free(struct soc_tplg_priv *soc_tplg)
 	free(soc_tplg);
 }
 
-static soc_tplg_elem_t *lookup_element(struct list_head *base,
+static struct soc_tplg_elem *lookup_element(struct list_head *base,
 				const char* id,
 				u32 type)
 {
 	struct list_head *pos, *npos;
-	soc_tplg_elem_t *elem;
+	struct soc_tplg_elem *elem;
 
 	//printf("lookup %s, type %d\n",id, type);
 	list_for_each_safe(pos, npos, base) {
 
-		elem = list_entry(pos, soc_tplg_elem_t, list);
+		elem = list_entry(pos, struct soc_tplg_elem, list);
 		//printf("\tfound elem '%s', type %d\n", elem->id, elem->type);
 		if (!strcmp(elem->id, id) && elem->type == type) {
 			return elem;
@@ -261,16 +264,16 @@ static soc_tplg_elem_t *lookup_element(struct list_head *base,
 }
 
 #if 0
-static soc_tplg_elem_t *lookup_pcm_dai_stream(struct list_head *base, const char* id)
+static struct soc_tplg_elem *lookup_pcm_dai_stream(struct list_head *base, const char* id)
 {
 	struct list_head *pos, *npos;
-	soc_tplg_elem_t *elem;
+	struct soc_tplg_elem *elem;
 	struct snd_soc_tplg_pcm_dai *pcm_dai;
 
 	list_for_each_safe(pos, npos, base) {
 
-		elem = list_entry(pos, soc_tplg_elem_t, list);
-		if (elem->type != SND_SOC_TPLG_PCM)
+		elem = list_entry(pos, struct soc_tplg_elem, list);
+		if (elem->type != PARSER_TYPE_PCM)
 			return NULL;
 
 		pcm_dai = elem->pcm;
@@ -370,7 +373,7 @@ static int parse_data(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg,
 
 	snd_config_get_id(cfg, &id);
 	strncpy(elem->id, id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
-	elem->type = SND_SOC_TPLG_DATA;
+	elem->type = PARSER_TYPE_DATA;
 
 	snd_config_for_each(i, next, cfg) {
 
@@ -453,7 +456,7 @@ static int parse_text(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg,
 
 	snd_config_get_id(cfg, &id);
 	strncpy(elem->id, id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
-	elem->type = SND_SOC_TPLG_TEXT;
+	elem->type = PARSER_TYPE_TEXT;
 
 	snd_config_for_each(i, next, cfg) {
 
@@ -663,7 +666,7 @@ static int parse_tlv(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg,
 	snd_config_get_id(cfg, &id);
 
 	strncpy(elem->id, id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
-	elem->type = SND_SOC_TPLG_TLV;
+	elem->type = PARSER_TYPE_TLV;
 
 	snd_config_for_each(i, next, cfg) {
 
@@ -723,7 +726,7 @@ static int parse_control_bytes(struct soc_tplg_priv *soc_tplg,
 	strncpy(elem->id, id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
 
 	elem->bytes_ext = be;
-	elem->type = SND_SOC_TPLG_TYPE_BYTES;
+	elem->type = PARSER_TYPE_BYTES;
 	strncpy(be->hdr.name, elem->id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
 	be->size = sizeof(*be);
 
@@ -833,7 +836,7 @@ static int parse_control_enum(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg,
 
 	/* init new mixer */	
 	elem->enum_ctrl = ec;
-	elem->type = SND_SOC_TPLG_TYPE_ENUM;
+	elem->type = PARSER_TYPE_ENUM;
 	strncpy(ec->hdr.name, elem->id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);	
 	ec->hdr.access = SNDRV_CTL_ELEM_ACCESS_TLV_READ |
 		SNDRV_CTL_ELEM_ACCESS_READWRITE;
@@ -870,8 +873,8 @@ static int parse_control_enum(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg,
 			if (snd_config_get_string(n, &val) < 0)
 				return -EINVAL;
 
-			strncpy(elem->text_ref, val, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
-			tplg_dbg("\t%s: %s\n", id, elem->text_ref);
+			add_ref(elem, PARSER_TYPE_TEXT, val);
+			tplg_dbg("\t%s: %s\n", id, val);
 			continue;
 		}
 		
@@ -896,8 +899,8 @@ static int parse_control_enum(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg,
 			if (snd_config_get_string(n, &val) < 0)
 				return -EINVAL;
 
-			strncpy(elem->data_ref, val, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
-			tplg_dbg("\t%s: %s\n", id, elem->data_ref);
+			add_ref(elem, PARSER_TYPE_DATA, val);
+			tplg_dbg("\t%s: %s\n", id, val);
 			continue;
 		}
 	}
@@ -953,7 +956,7 @@ static int parse_control_mixer(struct soc_tplg_priv *soc_tplg,
 
 	/* init new mixer */	
 	elem->mixer_ctrl = mc;
-	elem->type = SND_SOC_TPLG_TYPE_MIXER;
+	elem->type = PARSER_TYPE_MIXER;
 	strncpy(mc->hdr.name, elem->id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);	
 	mc->hdr.access = SNDRV_CTL_ELEM_ACCESS_TLV_READ |
 		SNDRV_CTL_ELEM_ACCESS_READWRITE;
@@ -1030,7 +1033,7 @@ static int parse_control_mixer(struct soc_tplg_priv *soc_tplg,
 			if (snd_config_get_string(n, &val) < 0)
 				return -EINVAL;
 
-			err = add_ref(elem, val);
+			err = add_ref(elem, PARSER_TYPE_TLV, val);
 			if (err < 0)
 				return err;				
 
@@ -1078,7 +1081,7 @@ static int parse_dapm_widget(struct soc_tplg_priv *soc_tplg,
 	strncpy(elem->id, id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
 
 	elem->widget = widget;
-	elem->type = SND_SOC_TPLG_TYPE_DAPM_WIDGET;
+	elem->type = PARSER_TYPE_DAPM_WIDGET;
 	strncpy(widget->name, elem->id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
 	widget->size = sizeof(*widget);
 
@@ -1135,7 +1138,7 @@ static int parse_dapm_widget(struct soc_tplg_priv *soc_tplg,
 			if (snd_config_get_string(n, &val) < 0)
 				return -EINVAL;
 
-			err = add_ref(elem, val);
+			err = add_ref(elem, PARSER_TYPE_ENUM, val);
 			if (err < 0)
 				return err;
 
@@ -1244,7 +1247,7 @@ static int parse_pcm_config(struct soc_tplg_priv *soc_tplg,
 	strncpy(elem->id, id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
 
 	elem->stream_cfg = sc;
-	elem->type = SND_SOC_TPLG_STREAM_CONFIG;
+	elem->type = PARSER_TYPE_STREAM_CONFIG;
 	sc->size = sizeof(*sc);
 
 	tplg_dbg(" PCM Config: %s\n", elem->id);
@@ -1415,7 +1418,7 @@ static int parse_pcm_caps(struct soc_tplg_priv *soc_tplg,
 
 	sc->size = sizeof(*sc);
 	elem->stream_caps = sc;
-	elem->type = SND_SOC_TPLG_STREAM_CAPS;
+	elem->type = PARSER_TYPE_STREAM_CAPS;
 	strncpy(sc->name, elem->id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);	
 
 	tplg_dbg(" PCM Capabilities: %s\n", elem->id);
@@ -1575,7 +1578,7 @@ static int parse_pcm(struct soc_tplg_priv *soc_tplg,
 	strncpy(elem->id, id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
 
 	elem->pcm_info = pcm;
-	elem->type = SND_SOC_TPLG_PCM_INFO;
+	elem->type = PARSER_TYPE_PCM_INFO;
 	strncpy(pcm->name, elem->id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
 	pcm->size = sizeof(*pcm);
 	priv.elem = elem;
@@ -1664,7 +1667,7 @@ static int parse_routes(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg)
 				return -ENOMEM;
 			list_add_tail(&elem->list, &soc_tplg->route_list);
 			strcpy(elem->id, "route");
-			elem->type = SND_SOC_TPLG_TYPE_DAPM_GRAPH;
+			elem->type = PARSER_TYPE_DAPM_GRAPH;
 
 			route= calloc(1, sizeof(*route));
 			if (!route)
@@ -1798,7 +1801,7 @@ static int parse_pcm_dai(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg,
 	if (!pcm_dai)
 		return -ENOMEM;
 	elem->pcm = pcm_dai;
-	elem->type = SND_SOC_TPLG_TYPE_PCM;
+	elem->type = PARSER_TYPE_PCM;
 	pcm_dai->size = sizeof(pcm_dai);
 
 	printf("find pcm_dai '%s'\n", elem->id);
@@ -2023,14 +2026,14 @@ static int check_routes(struct soc_tplg_priv *soc_tplg)
 {
 #if 0
 	struct list_head *base, *pos, *npos;
-	soc_tplg_elem_t *elem;
+	struct soc_tplg_elem *elem;
 	struct snd_soc_tplg_dapm_graph_elem *route;
 
 	base = &soc_tplg->route_list;
 	list_for_each_safe(pos, npos, base) {
-		elem = list_entry(pos, soc_tplg_elem_t, list);
+		elem = list_entry(pos, struct soc_tplg_elem, list);
 
-		if (!elem->route || elem->type != SND_SOC_TPLG_DAPM_GRAPH) {
+		if (!elem->route || elem->type != PARSER_TYPE_DAPM_GRAPH) {
 			tplg_error("Invalid route 's'\n", elem->id);
 			return -EINVAL;
 		}
@@ -2041,7 +2044,7 @@ static int check_routes(struct soc_tplg_priv *soc_tplg)
 
 		if (strlen(route->sink)
 			&& !lookup_element(&soc_tplg->widget_list, route->sink,
-			SND_SOC_TPLG_DAPM_WIDGET)
+			PARSER_TYPE_DAPM_WIDGET)
 			&& !lookup_pcm_dai_stream(&soc_tplg->pcm_list, route->sink)) {
 			tplg_error("Route: Undefined sink widget/stream '%s'\n",
 				route->sink);
@@ -2050,7 +2053,7 @@ static int check_routes(struct soc_tplg_priv *soc_tplg)
 
 		if (strlen(route->control)
 			&& !lookup_element(&soc_tplg->control_list, route->control,
-			SND_SOC_TPLG_MIXER)) {
+			PARSER_TYPE_MIXER)) {
 			tplg_error("Route: Undefined mixer control '%s'\n",
 				route->control);
 			return -EINVAL;
@@ -2058,7 +2061,7 @@ static int check_routes(struct soc_tplg_priv *soc_tplg)
 
 		if (strlen(route->source)
 			&& !lookup_element(&soc_tplg->widget_list, route->source,
-			SND_SOC_TPLG_DAPM_WIDGET)
+			PARSER_TYPE_DAPM_WIDGET)
 			&& !lookup_pcm_dai_stream(&soc_tplg->pcm_list, route->source)) {
 			tplg_error("Route: Undefined source widget/stream '%s'\n",
 				route->source);
@@ -2069,26 +2072,32 @@ static int check_routes(struct soc_tplg_priv *soc_tplg)
 	return 0;
 }
 
+/* make sure that TLV data referenced by control is available */
 static int check_referenced_tlv(struct soc_tplg_priv *soc_tplg,
-				soc_tplg_elem_t *elem)
+				struct soc_tplg_elem *elem)
 {
-	soc_tplg_ref_t *ref;
+	struct soc_tplg_ref *ref;
 	struct list_head *base, *pos, *npos;
 
 	tplg_dbg("\nCheck control tlv: '%s'\n", elem->id);
 
 	base = &elem->ref_list;
+
 	list_for_each_safe(pos, npos, base) {
 
-		ref = list_entry(pos, soc_tplg_ref_t, list);
+		ref = list_entry(pos, struct soc_tplg_ref, list);
 		if (ref->id && !ref->elem) {
+
 			ref->elem = lookup_element(&soc_tplg->tlv_list,
-				ref->id, SND_SOC_TPLG_TLV);
+				ref->id, PARSER_TYPE_TLV);
 			if (!ref->elem) {
 				tplg_error("Cannot find tlv '%s' referenced by"
 					" control '%s'\n", ref->id, elem->id);
 				return -EINVAL;
 			}
+
+			/* attach TLV to kcontrol */
+			//elem->tlv_ref = ref
 		}
 	}
 
@@ -2098,14 +2107,14 @@ static int check_referenced_tlv(struct soc_tplg_priv *soc_tplg,
 static int check_controls(struct soc_tplg_priv *soc_tplg)
 {
 	struct list_head *base, *pos, *npos;
-	soc_tplg_elem_t *elem;
+	struct soc_tplg_elem *elem;
 	int err;
 
 	base = &soc_tplg->control_list;
 
 	list_for_each_safe(pos, npos, base) {
 
-		elem = list_entry(pos, soc_tplg_elem_t, list);
+		elem = list_entry(pos, struct soc_tplg_elem, list);
 
 		err = check_referenced_tlv(soc_tplg, elem);
 		if (err < 0)
@@ -2116,7 +2125,7 @@ static int check_controls(struct soc_tplg_priv *soc_tplg)
 }
 
 static int check_referenced_controls(struct soc_tplg_priv *soc_tplg,
-	soc_tplg_elem_t *elem)
+	struct soc_tplg_elem *elem)
 {
 	return 0;
 }
@@ -2125,14 +2134,14 @@ static int check_widgets(struct soc_tplg_priv *soc_tplg)
 {
 
 	struct list_head *base, *pos, *npos;
-	soc_tplg_elem_t *elem;
+	struct soc_tplg_elem *elem;
 	int err;
 
 	base = &soc_tplg->widget_list;
 	list_for_each_safe(pos, npos, base) {
 
-		elem = list_entry(pos, soc_tplg_elem_t, list);
-		if (!elem->widget|| elem->type != SND_SOC_TPLG_TYPE_DAPM_WIDGET) {
+		elem = list_entry(pos, struct soc_tplg_elem, list);
+		if (!elem->widget|| elem->type != PARSER_TYPE_DAPM_WIDGET) {
 			tplg_error("Invalid widget '%s'\n", elem->id);
 			return -EINVAL;
 		}
