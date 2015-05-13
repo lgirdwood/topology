@@ -33,7 +33,7 @@ static void verbose(struct soc_tplg_priv *soc_tplg, const char *fmt, ...)
 
 /* write out block header to output file */
 static int write_block_header(struct soc_tplg_priv *soc_tplg, u32 type,
-	u32 vendor_type, u32 version, u32 id, size_t payload_size)
+	u32 vendor_type, u32 version, u32 index, size_t payload_size)
 {
 	struct snd_soc_tplg_hdr hdr;
 	size_t bytes;
@@ -46,7 +46,7 @@ static int write_block_header(struct soc_tplg_priv *soc_tplg, u32 type,
 	hdr.vendor_type = vendor_type;
 	hdr.version = version;
 	hdr.payload_size = payload_size;
-	hdr.id = id;
+	hdr.index = index;
 
 	/* make sure file offset is aligned with the calculated HDR offset */
 	if (offset != soc_tplg->next_hdr_pos) {
@@ -71,71 +71,132 @@ static int write_block_header(struct soc_tplg_priv *soc_tplg, u32 type,
 		return bytes;
 	}
 
-	return 0;
+	return bytes;
 }
 
-static int write_mixer(struct soc_tplg_priv *soc_tplg,
-	struct snd_soc_tplg_mixer_control *mixer, int size)
+static int write_mixer_block(struct soc_tplg_priv *soc_tplg,
+	struct list_head *base, int size)
 {
-	int ret;
+	struct list_head *pos, *npos;
+	struct soc_tplg_elem *elem;
+	int ret, wsize = 0;
 
 	/* write the header for this block */
+	// TODO get version, playload, etc
 	ret = write_block_header(soc_tplg, 0, 0, 0, 0, size);
 	if (ret < 0) {
 		//tplg_error("failed to write control elems %d\n", ret);
 		return ret;
 	}
 
-	// for each elem write
+	/* write each mixer control from block */
+	list_for_each_safe(pos, npos, base) {
+
+		elem = list_entry(pos, struct soc_tplg_elem, list);
+		wsize += write(soc_tplg->out_fd, elem->mixer_ctrl, elem->size);
+	}
+
+	if (wsize != size)
+		fprintf(stderr, "size mismatch %d %d\n", size, wsize);
 
 	return 0;
 }
 
-static int write_graph(struct soc_tplg_priv *soc_tplg,
-	struct snd_soc_tplg_dapm_graph_elem *route, int size)
+static int write_graph_block(struct soc_tplg_priv *soc_tplg,
+	struct list_head *base, int size)
 {
-	
+	struct list_head *pos, *npos;
+	struct soc_tplg_elem *elem;
+	int ret, wsize = 0;
+
+	/* write the header for this block */
+	// TODO get version, playload, etc
+	ret = write_block_header(soc_tplg, 0, 0, 0, 0, size);
+	if (ret < 0) {
+		//tplg_error("failed to write control elems %d\n", ret);
+		return ret;
+	}
+
+	/* write each mixer control from block */
+	list_for_each_safe(pos, npos, base) {
+
+		elem = list_entry(pos, struct soc_tplg_elem, list);
+		wsize += write(soc_tplg->out_fd, elem->route, elem->size);
+	}
+
+	if (wsize != size)
+		fprintf(stderr, "size mismatch %d %d\n", size, wsize);
 
 	return 0;
 }
 
-static int write_widget(struct soc_tplg_priv *soc_tplg,
-	struct snd_soc_tplg_dapm_widget *widget, int size)
+static int write_widget_block(struct soc_tplg_priv *soc_tplg,
+	struct list_head *base, int size)
 {
-	
+	struct list_head *pos, *npos;
+	struct soc_tplg_elem *elem;
+	int ret, wsize = 0;
+
+	/* write the header for this block */
+	// TODO get version, playload, etc
+	ret = write_block_header(soc_tplg, 0, 0, 0, 0, size);
+	if (ret < 0) {
+		//tplg_error("failed to write control elems %d\n", ret);
+		return ret;
+	}
+
+	/* write each mixer control from block */
+	list_for_each_safe(pos, npos, base) {
+
+		elem = list_entry(pos, struct soc_tplg_elem, list);
+		wsize += write(soc_tplg->out_fd, elem->widget, elem->size);
+	}
+
+	if (wsize != size)
+		fprintf(stderr, "size mismatch %d %d\n", size, wsize);
 
 	return 0;
 }
 
 static int calc_block_size(struct soc_tplg_priv *soc_tplg,
-	struct soc_tplg_elem *elem)
+	struct list_head *base)
 {
-	// for each elem in this block
-	// calc object size and add to block total
-	return 0;
+	struct list_head *pos, *npos;
+	struct soc_tplg_elem *elem;
+	int size = 0;
+
+	list_for_each_safe(pos, npos, base) {
+
+		elem = list_entry(pos, struct soc_tplg_elem, list);
+		size += elem->size;
+	}
+
+	return size;
 }
 
-static int write_block(struct soc_tplg_priv *soc_tplg, struct list_head *base)
+static int write_block(struct soc_tplg_priv *soc_tplg, struct list_head *base,
+	int type)
 {
-	struct soc_tplg_elem *elem;
 	int size;
 
 	/* calculate the block size in bytes for all elems */
-	size = calc_block_size(soc_tplg, elem);
+	size = calc_block_size(soc_tplg, base);
 	if (size == 0)
 		return 0;
 
+	printf("block_size for type %d is %d\n", type, size);
+
 	/* write each elem for this block */
 	/* TODO: add all objects */
-	switch (elem->type) {
+	switch (type) {
 	case PARSER_TYPE_MIXER:
-		return write_mixer(soc_tplg, elem->mixer_ctrl, size);
+		return write_mixer_block(soc_tplg, base, size);
 	case PARSER_TYPE_BYTES:
 	case PARSER_TYPE_ENUM:
 	case PARSER_TYPE_DAPM_GRAPH:
-		return write_graph(soc_tplg, elem->route, size);
+		return write_graph_block(soc_tplg, base, size);
 	case PARSER_TYPE_DAPM_WIDGET:
-		return write_widget(soc_tplg, elem->widget, size);
+		return write_widget_block(soc_tplg, base, size);
 	case PARSER_TYPE_PCM:
 	default:
 		return -EINVAL;
@@ -148,22 +209,29 @@ int socfw_write_data(struct soc_tplg_priv *soc_tplg)
 {
 	int ret;
 
+	fprintf(stdout, "writing output file\n");
+
+	// TODO open output file for writting
+
 	/* write control elems */
-	ret = write_block(soc_tplg, &soc_tplg->control_list);
+	ret = write_block(soc_tplg, &soc_tplg->control_list,
+		PARSER_TYPE_MIXER);
 	if (ret < 0) {
 		//tplg_error("failed to write control elems %d\n", ret);
 		return ret;
 	}
 	
 	/* write widget elems */
-	ret = write_block(soc_tplg, &soc_tplg->widget_list);
+	ret = write_block(soc_tplg, &soc_tplg->widget_list,
+		PARSER_TYPE_DAPM_WIDGET);
 	if (ret < 0) {
 		//tplg_error("failed to write widget elems %d\n", ret);
 		return ret;
 	}
 
 	/* write route elems */
-	ret = write_block(soc_tplg, &soc_tplg->route_list);
+	ret = write_block(soc_tplg, &soc_tplg->route_list,
+		PARSER_TYPE_DAPM_GRAPH);
 	if (ret < 0) {
 		//tplg_error("failed to write graph elems %d\n", ret);
 		return ret;
@@ -171,6 +239,7 @@ int socfw_write_data(struct soc_tplg_priv *soc_tplg)
 
 	/* TODO: add other items */
 
+	// TODO: close output file
 	return 0;
 }
 
