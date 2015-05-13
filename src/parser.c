@@ -598,14 +598,14 @@ static int parse_tlv_dbscale(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg,
 
 	tplg_dbg(" TLV DBScale: %s\n", elem->id);
 
-	tplg_tlv = calloc(1, sizeof(*tplg_tlv) + TLV_DB_SCALE_SIZE);
+	tplg_tlv = calloc(1, sizeof(*tplg_tlv));
 	if (!tplg_tlv)
 		return -ENOMEM;
-	data = (int*)(tplg_tlv + 1);
+	data = (int*)(tplg_tlv->data);
 
 	elem->tlv = tplg_tlv;
 	tplg_tlv->numid = SNDRV_CTL_TLVT_DB_SCALE;
-	tplg_tlv->size = sizeof(*tplg_tlv) + TLV_DB_SCALE_SIZE;
+	tplg_tlv->size = sizeof(*tplg_tlv);
 
 	snd_config_for_each(i, next, cfg) {
 
@@ -633,6 +633,9 @@ static int parse_tlv_dbscale(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg,
 		else
 			tplg_error("unknown key %s\n", id);
 	}
+
+	/* SND_SOC_TPLG_TLV_SIZE must be > 3 */
+	tplg_tlv->count = 3;
 
 	return 0;
 }
@@ -908,6 +911,24 @@ static int parse_control_enum(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg,
 	return 0;
 }
 
+static int copy_tlv(struct soc_tplg_priv *soc_tplg, const char *tlv_name,
+	struct snd_soc_tplg_ctl_tlv *tlv)
+{
+	struct soc_tplg_elem *tlv_elem;
+
+	tlv_elem = lookup_element(&soc_tplg->tlv_list, tlv_name,
+		PARSER_TYPE_TLV);
+	
+	if (tlv_elem == NULL) {
+		tplg_error("Cannot find tlv '%s'\n", tlv_name);
+		return -EINVAL;
+	}
+
+	memcpy(tlv, tlv_elem->tlv, sizeof(*tlv));
+
+	return 0;
+}
+
 /* Parse Controls.
  *
  * Each Control is described in new section
@@ -1033,7 +1054,7 @@ static int parse_control_mixer(struct soc_tplg_priv *soc_tplg,
 			if (snd_config_get_string(n, &val) < 0)
 				return -EINVAL;
 
-			err = add_ref(elem, PARSER_TYPE_TLV, val);
+			err = copy_tlv(soc_tplg, val, &mc->tlv);
 			if (err < 0)
 				return err;				
 
