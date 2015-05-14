@@ -2161,8 +2161,9 @@ static int copy_tlv(struct soc_tplg_elem *elem, struct soc_tplg_elem *ref)
 	tplg_dbg("\t merge tlv '%s' to mixer '%s' size %d + %d -> %d\n", ref->id, elem->id, 
 		elem->size, ref->size, elem->size + ref->size);
 
-	elem->size += ref->size;
-	memcpy(&mixer_ctrl->tlv, tlv, sizeof(struct snd_soc_tplg_ctl_tlv));
+	/* TLV has a fixed size */
+	elem->size += sizeof(*tlv);
+	memcpy(&mixer_ctrl->tlv, tlv, sizeof(*tlv));
 	return 0;
 }
 
