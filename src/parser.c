@@ -647,7 +647,7 @@ static int parse_ops(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg,
  *
  * Parse DBScale describing min, step, mute in DB.
  *
- * DBScale [
+ * scale [
  *		min <int>
  *		step <int>
  * 		mute <int>
@@ -662,7 +662,7 @@ static int parse_tlv_dbscale(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg,
 	const char *id = NULL, *value = NULL;
 	int *data;
 
-	tplg_dbg(" TLV DBScale: %s\n", elem->id);
+	tplg_dbg(" scale: %s\n", elem->id);
 
 	tplg_tlv = calloc(1, sizeof(*tplg_tlv));
 	if (!tplg_tlv)
@@ -1189,6 +1189,24 @@ static int parse_dapm_widget(struct soc_tplg_priv *soc_tplg,
 				widget->reg = -1;
 
 			tplg_dbg("\t%s: %s\n", id, val);
+			continue;
+		}
+
+		if (strcmp(id, "shift") == 0) {
+			if (snd_config_get_string(n, &val) < 0)
+				return -EINVAL;
+
+			widget->shift = atoi(val);
+			tplg_dbg("\t%s: %d\n", id, widget->shift);
+			continue;
+		}
+
+		if (strcmp(id, "invert") == 0) {
+			if (snd_config_get_string(n, &val) < 0)
+				return -EINVAL;
+
+			widget->invert = atoi(val);
+			tplg_dbg("\t%s: %d\n", id, widget->invert);
 			continue;
 		}
 
