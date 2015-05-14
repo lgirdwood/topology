@@ -79,7 +79,7 @@ static int write_mixer_block(struct soc_tplg_priv *soc_tplg,
 {
 	struct list_head *pos, *npos;
 	struct soc_tplg_elem *elem;
-	int ret, wsize = 0;
+	int ret, wsize = 0, i;
 
 	/* write the header for this block */
 	// TODO get version, playload, etc
@@ -93,11 +93,16 @@ static int write_mixer_block(struct soc_tplg_priv *soc_tplg,
 	list_for_each_safe(pos, npos, base) {
 
 		elem = list_entry(pos, struct soc_tplg_elem, list);
-		wsize += write(soc_tplg->out_fd, elem->mixer_ctrl, elem->size);
+		verbose(soc_tplg, " mixer '%s': start to write %d bytes\n",
+			elem->id, elem->size);
+		i = write(soc_tplg->out_fd, elem->mixer_ctrl, elem->size);
+		verbose(soc_tplg, " written %d bytes\n", i);
+		wsize += i;
 	}
 
 	if (wsize != size)
-		fprintf(stderr, "size mismatch %d %d\n", size, wsize);
+		fprintf(stderr, "write mixer block: size mismatch %d %d\n",
+			size, wsize);
 
 	return 0;
 }
@@ -107,7 +112,7 @@ static int write_graph_block(struct soc_tplg_priv *soc_tplg,
 {
 	struct list_head *pos, *npos;
 	struct soc_tplg_elem *elem;
-	int ret, wsize = 0;
+	int ret, wsize = 0, i;
 
 	/* write the header for this block */
 	// TODO get version, playload, etc
@@ -121,7 +126,11 @@ static int write_graph_block(struct soc_tplg_priv *soc_tplg,
 	list_for_each_safe(pos, npos, base) {
 
 		elem = list_entry(pos, struct soc_tplg_elem, list);
-		wsize += write(soc_tplg->out_fd, elem->route, elem->size);
+		verbose(soc_tplg, " route '%s': start to write %d bytes\n",
+			elem->id, elem->size);
+		i = write(soc_tplg->out_fd, elem->route, elem->size);
+		verbose(soc_tplg, " written %d bytes\n", i);
+		wsize += i;
 	}
 
 	if (wsize != size)
@@ -135,7 +144,7 @@ static int write_widget_block(struct soc_tplg_priv *soc_tplg,
 {
 	struct list_head *pos, *npos;
 	struct soc_tplg_elem *elem;
-	int ret, wsize = 0;
+	int ret, wsize = 0, i;
 
 	/* write the header for this block */
 	// TODO get version, playload, etc
@@ -149,13 +158,81 @@ static int write_widget_block(struct soc_tplg_priv *soc_tplg,
 	list_for_each_safe(pos, npos, base) {
 
 		elem = list_entry(pos, struct soc_tplg_elem, list);
-		wsize += write(soc_tplg->out_fd, elem->widget, elem->size);
+		verbose(soc_tplg, " widget '%s': start to write %d bytes\n",
+			elem->id, elem->size);
+		i = write(soc_tplg->out_fd, elem->widget, elem->size);
+		verbose(soc_tplg, " written %d bytes\n", i);
+		wsize += i;
 	}
 
 	if (wsize != size)
-		fprintf(stderr, "size mismatch %d %d\n", size, wsize);
+		fprintf(stderr, "write widget block: size mismatch %d %d\n",
+			size, wsize);
 
 	return 0;
+}
+
+static struct soc_tplg_elem *lookup_element(struct list_head *base,
+				const char* id,
+				u32 type)
+{
+	struct list_head *pos, *npos;
+	struct soc_tplg_elem *elem;
+
+	list_for_each_safe(pos, npos, base) {
+
+		elem = list_entry(pos, struct soc_tplg_elem, list);
+		if (!strcmp(elem->id, id) && elem->type == type) {
+			return elem;
+		}
+	}
+
+	return NULL;
+}
+
+static int calc_refelem_size(struct soc_tplg_priv *soc_tplg,
+	struct soc_tplg_elem *elem)
+{
+	struct soc_tplg_ref *ref;
+	struct list_head *base, *pos, *npos;
+	struct soc_tplg_elem *ref_elem;
+	int size = 0;
+
+	/*
+	 * Currently only widget could be appended with other controls.
+	 * For the widget, we should calc the ref elem's object size.
+	 *
+	 * File block representation for DAPM widget :-
+	 * +-------------------------------------+-----+
+	 * | struct snd_soc_tplg_hdr             |  1  |
+	 * +-------------------------------------+-----+
+	 * | struct snd_soc_tplg_dapm_widget     |  N  |
+	 * +-------------------------------------+-----+
+	 * |   struct snd_soc_tplg_enum_control  | 0|1 |
+	 * |   struct snd_soc_tplg_mixer_control | 0|N |
+	 * +-------------------------------------+-----+
+	 */
+	if (elem->type != PARSER_TYPE_DAPM_WIDGET)
+		return 0;
+
+	base = &elem->ref_list;
+	list_for_each_safe(pos, npos, base) {
+
+		ref = list_entry(pos, struct soc_tplg_ref, list);
+		if ((ref->type == PARSER_TYPE_ENUM) ||
+			(ref->type == PARSER_TYPE_MIXER)) {
+
+			ref_elem = lookup_element(&soc_tplg->control_list,
+				ref->id, ref->type);
+			if (ref_elem == NULL) {
+				return -EINVAL;
+			}
+
+			size += ref_elem->size;
+		}
+	}
+
+ 	return size;
 }
 
 static int calc_block_size(struct soc_tplg_priv *soc_tplg,
@@ -163,12 +240,25 @@ static int calc_block_size(struct soc_tplg_priv *soc_tplg,
 {
 	struct list_head *pos, *npos;
 	struct soc_tplg_elem *elem;
-	int size = 0;
+	int size = 0, refelem_size;
 
 	list_for_each_safe(pos, npos, base) {
 
 		elem = list_entry(pos, struct soc_tplg_elem, list);
-		size += elem->size;
+
+		/*
+		 * For the elem (e.g. widget) which references other elems,
+		 * we should also calc the size of referenced elems because
+		 * the referenced elem's object would be appended to the
+		 * end of current elem (e.g. widget).
+		 */
+		refelem_size = calc_refelem_size(soc_tplg, elem);
+
+		/*
+		 * elem->size only indicates the object size (not include the 
+		 * elem structure itself)
+		 */
+		size += elem->size + refelem_size;
 	}
 
 	return size;
@@ -179,7 +269,7 @@ static int write_block(struct soc_tplg_priv *soc_tplg, struct list_head *base,
 {
 	int size;
 
-	/* calculate the block size in bytes for all elems */
+	/* calculate the block size in bytes for all elems in this list */
 	size = calc_block_size(soc_tplg, base);
 	if (size == 0)
 		return 0;
@@ -211,9 +301,15 @@ int socfw_write_data(struct soc_tplg_priv *soc_tplg)
 
 	fprintf(stdout, "writing output file\n");
 
-	// TODO open output file for writting
+	/* soc_tplg->out_fd is the handle of output file */
 
-	/* write control elems */
+	/*
+	 * write control elems.
+	 */
+	/*
+	 * jinyao: the control elems which are referenced by widgets should be
+	 * removed from this control_list or should have a tag to inidicate it.
+	 */
 	ret = write_block(soc_tplg, &soc_tplg->control_list,
 		PARSER_TYPE_MIXER);
 	if (ret < 0) {
@@ -239,7 +335,8 @@ int socfw_write_data(struct soc_tplg_priv *soc_tplg)
 
 	/* TODO: add other items */
 
-	// TODO: close output file
+	/* The handle of output file is closed in socfw_free */
+
 	return 0;
 }
 
