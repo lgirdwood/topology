@@ -116,7 +116,7 @@ static const struct map_elem pcm_format_map[] = {
 	{"U32_BE", SNDRV_PCM_FORMAT_U32_BE},
 };
 
-static void tplg_error(const char *fmt, ...)
+void tplg_error(const char *fmt, ...)
 {
 	va_list va;
 
@@ -148,7 +148,7 @@ static void free_ref_list(struct list_head *base)
 
 	list_for_each_safe(pos, npos, base) {
 		ref = list_entry(pos, struct soc_tplg_ref, list);
-		printf("\tfree ref %s\n", ref->id);
+		//printf("\tfree ref %s\n", ref->id);
 		list_del(&ref->list);
 		free(ref);
 	}
@@ -168,7 +168,7 @@ static struct soc_tplg_elem *elem_new(void)
 
 static void elem_free(struct soc_tplg_elem *elem)
 {
-	printf("free element %s\n", elem->id);
+	//printf("free element %s\n", elem->id);
 	free_ref_list(&elem->ref_list);
 	free(elem);
 }
@@ -2200,6 +2200,15 @@ static int check_referenced_tlv(struct soc_tplg_priv *soc_tplg,
 	return 0;
 }
 
+static void copy_enum_texts(struct soc_tplg_elem *enum_elem,
+	struct soc_tplg_elem *ref_elem)
+{
+	struct snd_soc_tplg_enum_control *ec = enum_elem->enum_ctrl;
+
+	memcpy(ec->texts, ref_elem->texts,
+		SND_SOC_TPLG_NUM_TEXTS * SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
+}
+
 /* check referenced text for a enum control */
 static int check_referenced_text(struct soc_tplg_priv *soc_tplg,
 				struct soc_tplg_elem *elem)
@@ -2210,7 +2219,9 @@ static int check_referenced_text(struct soc_tplg_priv *soc_tplg,
 	tplg_dbg("\nCheck text of enum control: '%s'\n", elem->id);
 
 	base = &elem->ref_list;
+
 	list_for_each_safe(pos, npos, base) {
+
 		ref = list_entry(pos, struct soc_tplg_ref, list);
 		if (ref->id == NULL || ref->elem)
 			continue;
@@ -2222,7 +2233,9 @@ static int check_referenced_text(struct soc_tplg_priv *soc_tplg,
 				" control '%s'\n", ref->id, elem->id);
 			return -EINVAL;
 		}
-		/* TODO: copy text to the enum control */
+
+		/* copy texts to enum elem */
+		copy_enum_texts(elem, ref->elem);
 	}
 
 	return 0;
@@ -2259,21 +2272,23 @@ static int copy_control(struct soc_tplg_elem *elem, struct soc_tplg_elem *ref)
 	struct snd_soc_tplg_mixer_control *mixer_ctrl = ref->mixer_ctrl;
 	struct snd_soc_tplg_enum_control *enum_ctrl = ref->enum_ctrl;
 
-	tplg_dbg("\t merge control '%s' to widget '%s' size %d + %d -> %d, priv size ->%d\n",
-		ref->id, elem->id, elem->size, ref->size, elem->size + ref->size, widget->priv.size + ref->size);
+	tplg_dbg("\t merge control '%s' to widget '%s' size %d + %d -> %d, priv size -> %d\n",
+		ref->id, elem->id, elem->size, ref->size,
+		elem->size + ref->size, widget->priv.size);
 
-	widget = realloc(widget, elem->size + ref->size );
+	widget = realloc(widget, elem->size + ref->size);
 	if (!widget)
 		return -ENOMEM;
 
 	elem->widget = widget;
-	elem->size += ref->size;
-	widget->priv.size +=  ref->size;
 
+	/* copy new widget at the end */
 	if (ref->type == PARSER_TYPE_MIXER)
-		memcpy(&widget->priv.data + widget->priv.size, mixer_ctrl,  ref->size);
+		memcpy((void*)widget + elem->size, mixer_ctrl, ref->size);
 	else if (ref->type == PARSER_TYPE_ENUM)
-		memcpy(&widget->priv.data + widget->priv.size, enum_ctrl,  ref->size);
+		memcpy((void*)widget + elem->size, enum_ctrl, ref->size);
+
+	elem->size += ref->size;
 
 	/* remove the control from global control list to avoid double output */
 	list_del(&ref->list);

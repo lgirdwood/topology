@@ -120,8 +120,7 @@ struct soc_tplg_elem {
 	int index;
 	enum parser_type type;
 
-	// TODO: calc size for each object 
-	int size; /* size of this object */
+	int size; /* total size of this object inc pdata and ref objects */
 
 	/* UAPI object for this elem */
 	union {
@@ -151,8 +150,9 @@ struct soc_tplg_elem {
 };
 
 int socfw_write_data(struct soc_tplg_priv *soc_tplg);
+void tplg_error(const char *fmt, ...);
 
-#define SOC_TPLG_DEBUG  /* TO REMOVE */
+#define SOC_TPLG_DEBUG
 #ifdef SOC_TPLG_DEBUG
 #define tplg_dbg tplg_error
 #else
