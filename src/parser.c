@@ -2153,6 +2153,19 @@ static int check_routes(struct soc_tplg_priv *soc_tplg)
 	return 0;
 }
 
+static int copy_tlv(struct soc_tplg_elem *elem, struct soc_tplg_elem *ref)
+{
+	struct snd_soc_tplg_mixer_control *mixer_ctrl =  elem->mixer_ctrl;
+	struct snd_soc_tplg_ctl_tlv *tlv = ref->tlv;
+
+	tplg_dbg("\t merge tlv '%s' to mixer '%s' size %d + %d -> %d\n", ref->id, elem->id, 
+		elem->size, ref->size, elem->size + ref->size);
+
+	elem->size += ref->size;
+	memcpy(&mixer_ctrl->tlv, tlv, sizeof(struct snd_soc_tplg_ctl_tlv));
+	return 0;
+}
+
 /* make sure that TLV data referenced by control is available */
 static int check_referenced_tlv(struct soc_tplg_priv *soc_tplg,
 				struct soc_tplg_elem *elem)
@@ -2160,7 +2173,7 @@ static int check_referenced_tlv(struct soc_tplg_priv *soc_tplg,
 	struct soc_tplg_ref *ref;
 	struct list_head *base, *pos, *npos;
 
-	tplg_dbg("\nCheck control tlv: '%s'\n", elem->id);
+	tplg_dbg("\nCheck TLV of mixer: '%s'\n", elem->id);
 
 	base = &elem->ref_list;
 
@@ -2178,9 +2191,8 @@ static int check_referenced_tlv(struct soc_tplg_priv *soc_tplg,
 			tplg_error("Cannot find tlv '%s' referenced by"
 				" control '%s'\n", ref->id, elem->id);
 			return -EINVAL;
-		}
-
-		return 0;
+		} else
+			return copy_tlv(elem, ref->elem);
 	}
 
 	return 0;
@@ -2190,7 +2202,7 @@ static int check_controls(struct soc_tplg_priv *soc_tplg)
 {
 	struct list_head *base, *pos, *npos;
 	struct soc_tplg_elem *elem;
-	int err;
+	int err = 0;
 
 	base = &soc_tplg->control_list;
 
@@ -2198,7 +2210,9 @@ static int check_controls(struct soc_tplg_priv *soc_tplg)
 
 		elem = list_entry(pos, struct soc_tplg_elem, list);
 
-		err = check_referenced_tlv(soc_tplg, elem);
+		if (elem->type == PARSER_TYPE_MIXER)
+			err = check_referenced_tlv(soc_tplg, elem);
+		/* TODO: enum control may refer to text */
 		if (err < 0)
 			return err;
 	}
@@ -2206,9 +2220,71 @@ static int check_controls(struct soc_tplg_priv *soc_tplg)
 	return 0;
 }
 
+static int copy_control(struct soc_tplg_elem *elem, struct soc_tplg_elem *ref)
+{
+	struct snd_soc_tplg_dapm_widget *widget = elem->widget;
+	struct snd_soc_tplg_mixer_control *mixer_ctrl = ref->mixer_ctrl;
+	struct snd_soc_tplg_enum_control *enum_ctrl = ref->enum_ctrl;
+
+	tplg_dbg("\t merge control '%s' to widget '%s' size %d + %d -> %d, priv size ->%d\n",
+		ref->id, elem->id, elem->size, ref->size, elem->size + ref->size, widget->priv.size + ref->size);
+
+	widget = realloc(widget, elem->size + ref->size );
+	if (!widget)
+		return -ENOMEM;
+
+	elem->widget = widget;
+	elem->size += ref->size;
+	widget->priv.size +=  ref->size;
+
+	if (ref->type == PARSER_TYPE_MIXER)
+		memcpy(&widget->priv.data + widget->priv.size, mixer_ctrl,  ref->size);
+	else if (ref->type == PARSER_TYPE_ENUM)
+		memcpy(&widget->priv.data + widget->priv.size, enum_ctrl,  ref->size);
+
+	/* remove the control from global control list to avoid double output */
+	list_del(&ref->list);
+	return 0;
+}
+
 static int check_referenced_controls(struct soc_tplg_priv *soc_tplg,
 	struct soc_tplg_elem *elem)
 {
+	struct soc_tplg_ref *ref;
+	struct list_head *base, *pos, *npos;
+
+	tplg_dbg("\nCheck mixers of widget: '%s'\n", elem->id);
+
+	base = &elem->ref_list;
+
+	/* for each ref in this control elem */
+	list_for_each_safe(pos, npos, base) {
+
+		ref = list_entry(pos, struct soc_tplg_ref, list);
+		if (ref->id == NULL || ref->elem)
+			continue;
+
+		/* see if ref is a TLV */
+		ref->elem = lookup_element(&soc_tplg->control_list,
+			ref->id, PARSER_TYPE_MIXER);
+
+		if (!ref->elem)
+			ref->elem = lookup_element(&soc_tplg->control_list,
+			ref->id, PARSER_TYPE_ENUM);
+
+		if (!ref->elem) {
+			tplg_error("Cannot find control '%s' referenced by"
+				" widget '%s'\n", ref->id, elem->id);
+			return -EINVAL;
+		} else {
+			int ret;
+
+			ret = copy_control(elem, ref->elem);
+			if (ret < 0)
+				return ret;
+		}
+	}
+
 	return 0;
 }
 
