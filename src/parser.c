@@ -2153,6 +2153,7 @@ static int check_routes(struct soc_tplg_priv *soc_tplg)
 	return 0;
 }
 
+/* copy referenced TLV to the mixer control */
 static int copy_tlv(struct soc_tplg_elem *elem, struct soc_tplg_elem *ref)
 {
 	struct snd_soc_tplg_mixer_control *mixer_ctrl =  elem->mixer_ctrl;
@@ -2167,7 +2168,7 @@ static int copy_tlv(struct soc_tplg_elem *elem, struct soc_tplg_elem *ref)
 	return 0;
 }
 
-/* make sure that TLV data referenced by control is available */
+/* check referenced TLV for a mixer control */
 static int check_referenced_tlv(struct soc_tplg_priv *soc_tplg,
 				struct soc_tplg_elem *elem)
 {
@@ -2199,6 +2200,35 @@ static int check_referenced_tlv(struct soc_tplg_priv *soc_tplg,
 	return 0;
 }
 
+/* check referenced text for a enum control */
+static int check_referenced_text(struct soc_tplg_priv *soc_tplg,
+				struct soc_tplg_elem *elem)
+{
+	struct soc_tplg_ref *ref;
+	struct list_head *base, *pos, *npos;
+
+	tplg_dbg("\nCheck text of enum control: '%s'\n", elem->id);
+
+	base = &elem->ref_list;
+	list_for_each_safe(pos, npos, base) {
+		ref = list_entry(pos, struct soc_tplg_ref, list);
+		if (ref->id == NULL || ref->elem)
+			continue;
+
+		ref->elem = lookup_element(&soc_tplg->tlv_list,
+			ref->id, PARSER_TYPE_TEXT);
+		if (!ref->elem) {
+			tplg_error("Cannot find text '%s' referenced by"
+				" control '%s'\n", ref->id, elem->id);
+			return -EINVAL;
+		}
+		/* TODO: copy text to the enum control */
+	}
+
+	return 0;
+}
+
+
 static int check_controls(struct soc_tplg_priv *soc_tplg)
 {
 	struct list_head *base, *pos, *npos;
@@ -2213,7 +2243,8 @@ static int check_controls(struct soc_tplg_priv *soc_tplg)
 
 		if (elem->type == PARSER_TYPE_MIXER)
 			err = check_referenced_tlv(soc_tplg, elem);
-		/* TODO: enum control may refer to text */
+		else if (elem->type == PARSER_TYPE_ENUM)
+			err = check_referenced_text(soc_tplg, elem);
 		if (err < 0)
 			return err;
 	}
@@ -2221,6 +2252,7 @@ static int check_controls(struct soc_tplg_priv *soc_tplg)
 	return 0;
 }
 
+/* copy referenced controls to the widget */
 static int copy_control(struct soc_tplg_elem *elem, struct soc_tplg_elem *ref)
 {
 	struct snd_soc_tplg_dapm_widget *widget = elem->widget;
@@ -2248,6 +2280,7 @@ static int copy_control(struct soc_tplg_elem *elem, struct soc_tplg_elem *ref)
 	return 0;
 }
 
+/* check referenced controls for a widget */
 static int check_referenced_controls(struct soc_tplg_priv *soc_tplg,
 	struct soc_tplg_elem *elem)
 {
@@ -2265,7 +2298,6 @@ static int check_referenced_controls(struct soc_tplg_priv *soc_tplg,
 		if (ref->id == NULL || ref->elem)
 			continue;
 
-		/* see if ref is a TLV */
 		ref->elem = lookup_element(&soc_tplg->control_list,
 			ref->id, PARSER_TYPE_MIXER);
 
