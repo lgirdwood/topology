@@ -1724,46 +1724,89 @@ static int parse_pcm(struct soc_tplg_priv *soc_tplg,
 }
 #endif
 
+/* line is defined as '"source, control, sink"' */
+static int parse_line(const char *text,
+	struct snd_soc_tplg_dapm_graph_elem *line)
+{
+	char buf[1024];
+	int len, i;
+	const char *source = NULL, *sink = NULL, *control = NULL;
+
+	strncpy(buf, text, 1024);
+
+	len = strlen(buf);
+	if (len <= 2) {
+		tplg_error("error: invalid route \"%s\"\n", buf);
+		return -EINVAL;
+	}
+
+	/* find first , */
+	for (i = 1; i < len; i++) {
+		if (buf[i] == ',')
+			goto second;
+	}
+	tplg_error("error: invalid route \"%s\"\n", buf);
+	return -EINVAL;
+
+second:
+	/* find second , */
+	source = buf;
+	control = &buf[i + 2];
+	buf[i] = 0;
+
+	for (; i < len; i++) {
+		if (buf[i] == ',')
+			goto done;
+	}
+
+	tplg_error("error: invalid route \"%s\"\n", buf);
+	return -EINVAL;
+
+done:
+	buf[i] = 0;
+	sink = &buf[i + 2];
+
+	strcpy(line->source, source);
+	strcpy(line->control, control);
+	strcpy(line->sink, sink);
+	return 0;
+}
+
 static int parse_routes(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg)
 {
 	snd_config_iterator_t i, next;
 	snd_config_t *n;
-	int idx = 0;
 	struct soc_tplg_elem *elem;
-	struct snd_soc_tplg_dapm_graph_elem *route = NULL;
+	struct snd_soc_tplg_dapm_graph_elem *line = NULL;
+	int err;
 
 	snd_config_for_each(i, next, cfg) {
 		const char *val;
 
-		idx++;
-		idx %= 3;
 		n = snd_config_iterator_entry(i);
-		if (snd_config_get_string(n, &val) < 0) {
+		if (snd_config_get_string(n, &val) < 0)
 			continue;
-		}
 
-		if (idx == 1) {
-			elem = elem_new();
-			if (!elem)
-				return -ENOMEM;
-			list_add_tail(&elem->list, &soc_tplg->route_list);
-			strcpy(elem->id, "route");
-			elem->type = PARSER_TYPE_DAPM_GRAPH;
+		elem = elem_new();
+		if (!elem)
+			return -ENOMEM;
 
-			route= calloc(1, sizeof(*route));
-			if (!route)
-				return -ENOMEM;
-			elem->route = route;
-			strncpy(route->sink, val, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
+		list_add_tail(&elem->list, &soc_tplg->route_list);
+		strcpy(elem->id, "line");
+		elem->type = PARSER_TYPE_DAPM_GRAPH;
 
-		}
-		else if (idx == 2)
-			strncpy(route->control, val, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
-		else {
-			strncpy(route->source, val, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
-			tplg_dbg("route: sink '%s', control '%s', source '%s'\n",
-				route->sink, route->control, route->source);
-		}
+		line = calloc(1, sizeof(*line));
+		if (!line)
+			return -ENOMEM;
+
+		elem->route = line;
+
+		err = parse_line(val, line);
+		if (err < 0)
+			return err;
+
+		tplg_dbg("route: sink '%s', control '%s', source '%s'\n",
+				line->sink, line->control, line->source);
 	}
 
 	return 0;
@@ -1791,7 +1834,7 @@ static int parse_dapm_graph(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg,
 			continue;
 		}
 
-		if (strcmp(id, "Routes") == 0) {
+		if (strcmp(id, "lines") == 0) {
 			err = parse_routes(soc_tplg, n);
 			if (err < 0) {
 				tplg_error("error: failed to parse dapm graph %s\n", graph_id);
@@ -1842,7 +1885,6 @@ static int parse_pcm_dai_stream(snd_config_t *cfg, struct soc_tplg_elem *elem,
 			tplg_error("pcm_dai %s: invalid '%s' definition\n", elem->id, key);
 			return -EINVAL;
 		}
-		//tplg_dbg("\t%s: %s\n",key, val);
 
 		if (strcmp(key, "stream_name") == 0) {
 			if (stream_dir == SNDRV_PCM_STREAM_PLAYBACK)
@@ -2111,6 +2153,7 @@ static int check_routes(struct soc_tplg_priv *soc_tplg)
 	struct snd_soc_tplg_dapm_graph_elem *route;
 
 	base = &soc_tplg->route_list;
+
 	list_for_each_safe(pos, npos, base) {
 		elem = list_entry(pos, struct soc_tplg_elem, list);
 
@@ -2159,11 +2202,9 @@ static int copy_tlv(struct soc_tplg_elem *elem, struct soc_tplg_elem *ref)
 	struct snd_soc_tplg_mixer_control *mixer_ctrl =  elem->mixer_ctrl;
 	struct snd_soc_tplg_ctl_tlv *tlv = ref->tlv;
 
-	tplg_dbg("\t merge tlv '%s' to mixer '%s' size %d + %d -> %d\n", ref->id, elem->id, 
-		elem->size, ref->size, elem->size + ref->size);
+	tplg_dbg("TLV '%s' uses '%s\n", elem->id, ref->id);
 
 	/* TLV has a fixed size */
-	elem->size += sizeof(*tlv);
 	memcpy(&mixer_ctrl->tlv, tlv, sizeof(*tlv));
 	return 0;
 }
@@ -2174,8 +2215,6 @@ static int check_referenced_tlv(struct soc_tplg_priv *soc_tplg,
 {
 	struct soc_tplg_ref *ref;
 	struct list_head *base, *pos, *npos;
-
-	tplg_dbg("\nCheck TLV of mixer: '%s'\n", elem->id);
 
 	base = &elem->ref_list;
 
@@ -2215,8 +2254,6 @@ static int check_referenced_text(struct soc_tplg_priv *soc_tplg,
 {
 	struct soc_tplg_ref *ref;
 	struct list_head *base, *pos, *npos;
-
-	tplg_dbg("\nCheck text of enum control: '%s'\n", elem->id);
 
 	base = &elem->ref_list;
 
@@ -2265,14 +2302,14 @@ static int check_controls(struct soc_tplg_priv *soc_tplg)
 	return 0;
 }
 
-/* copy referenced controls to the widget */
-static int copy_control(struct soc_tplg_elem *elem, struct soc_tplg_elem *ref)
+/* move referenced controls to the widget */
+static int move_control(struct soc_tplg_elem *elem, struct soc_tplg_elem *ref)
 {
 	struct snd_soc_tplg_dapm_widget *widget = elem->widget;
 	struct snd_soc_tplg_mixer_control *mixer_ctrl = ref->mixer_ctrl;
 	struct snd_soc_tplg_enum_control *enum_ctrl = ref->enum_ctrl;
 
-	tplg_dbg("\t merge control '%s' to widget '%s' size %d + %d -> %d, priv size -> %d\n",
+	tplg_dbg("'%s' to '%s' size %d + %d -> %d, priv size -> %d\n",
 		ref->id, elem->id, elem->size, ref->size,
 		elem->size + ref->size, widget->priv.size);
 
@@ -2292,6 +2329,7 @@ static int copy_control(struct soc_tplg_elem *elem, struct soc_tplg_elem *ref)
 
 	/* remove the control from global control list to avoid double output */
 	list_del(&ref->list);
+	elem_free(ref);
 	return 0;
 }
 
@@ -2301,8 +2339,6 @@ static int check_referenced_controls(struct soc_tplg_priv *soc_tplg,
 {
 	struct soc_tplg_ref *ref;
 	struct list_head *base, *pos, *npos;
-
-	tplg_dbg("\nCheck mixers of widget: '%s'\n", elem->id);
 
 	base = &elem->ref_list;
 
@@ -2327,7 +2363,7 @@ static int check_referenced_controls(struct soc_tplg_priv *soc_tplg,
 		} else {
 			int ret;
 
-			ret = copy_control(elem, ref->elem);
+			ret = move_control(elem, ref->elem);
 			if (ret < 0)
 				return ret;
 		}
@@ -2384,6 +2420,7 @@ int parse_conf(struct soc_tplg_priv *soc_tplg, const char *filename)
 	snd_config_t *cfg;
 	int err = 0;
 
+	fprintf(stdout, "Loading config....\n");
 	err = tplg_load_config(filename, &cfg);
 	if (err < 0) {
 		tplg_error("Failed to load topology file %s\n",
@@ -2391,18 +2428,21 @@ int parse_conf(struct soc_tplg_priv *soc_tplg, const char *filename)
 		return err;
 	}
 
+	fprintf(stdout, "Parsing config....\n");
 	err = tplg_parse_config(soc_tplg, cfg);
 	if (err < 0) {
 		tplg_error("Failed to parse topology\n");
 		goto out;
 	}
 
+	fprintf(stdout, "Checking references....\n");
 	err = tplg_check_integ(soc_tplg);
 	if (err < 0) {
 		tplg_error("Failed to check topology integrity\n");
-		//goto out; // TODO fix integ checking
+		goto out;
 	}
 
+	fprintf(stdout, "Writing data\n");
 	err = socfw_write_data(soc_tplg);
 	if (err < 0) {
 		tplg_error("Failed to write data %d\n", err);

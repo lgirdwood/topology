@@ -279,7 +279,7 @@ static int calc_block_size(struct soc_tplg_priv *soc_tplg,
 	list_for_each_safe(pos, npos, base) {
 
 		elem = list_entry(pos, struct soc_tplg_elem, list);
-		tplg_dbg("Block size at %s is %d\n", elem->id, size);
+		//tplg_dbg("Block size at %s is %d\n", elem->id, size);
 
 		/*
 		 * For the elem (e.g. widget) which references other elems,
@@ -335,8 +335,6 @@ static int write_block(struct soc_tplg_priv *soc_tplg, struct list_head *base,
 int socfw_write_data(struct soc_tplg_priv *soc_tplg)
 {
 	int ret;
-
-	fprintf(stdout, "writing output file\n");
 
 	/* write control elems. */
 	ret = write_block(soc_tplg, &soc_tplg->control_list,
