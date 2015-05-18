@@ -472,7 +472,7 @@ static int parse_text(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg,
 	if (!elem)
 		return -ENOMEM;
 
-	list_add_tail(&elem->list, &soc_tplg->tlv_list);
+	list_add_tail(&elem->list, &soc_tplg->text_list);
 
 	snd_config_get_id(cfg, &id);
 	strncpy(elem->id, id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);

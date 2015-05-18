@@ -124,7 +124,6 @@ struct soc_tplg_elem {
 
 	/* UAPI object for this elem */
 	union {
-		struct snd_soc_tplg_ctl_tlv *tlv;
 		struct snd_soc_tplg_mixer_control *mixer_ctrl;
 		struct snd_soc_tplg_enum_control *enum_ctrl;
 		struct snd_soc_tplg_bytes_control *bytes_ext;
@@ -133,11 +132,14 @@ struct soc_tplg_elem {
 		struct snd_soc_tplg_pcm_dai *be;
 		struct snd_soc_tplg_pcm_dai *cc;
 		struct snd_soc_tplg_dapm_graph_elem *route;
-		struct snd_soc_tplg_text *text;
-		struct snd_soc_tplg_private *data;
 		struct snd_soc_tplg_stream_config *stream_cfg;
 		struct snd_soc_tplg_stream_caps *stream_caps;
 		struct snd_soc_tplg_pcm_info *pcm_info;
+
+		/* these do not map to UAPI structs but are internal only */
+		struct snd_soc_tplg_ctl_tlv *tlv;
+		struct snd_soc_tplg_text *text;
+		struct snd_soc_tplg_private *data;
 	};
 
 	/* an element may refer to other elements:
