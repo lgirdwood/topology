@@ -320,7 +320,8 @@ static int lookup_ops(const char *c)
 			return control_map[i].id;
 	}
 
-	return -EINVAL;
+	/* cant find string name in our table so we use its ID number */
+	return atoi(c);
 }
 
 #if 0
@@ -622,19 +623,12 @@ static int parse_ops(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg,
 		if (snd_config_get_string(n, &value) < 0)
 			continue;
 
-		if (strcmp(id, "info") == 0) {
+		if (strcmp(id, "info") == 0)
 			hdr->ops.info = lookup_ops(value);
-			if (hdr->ops.info < 0)
-				hdr->ops.info = atoi(value);
-		} else if (strcmp(id, "get") == 0) {
+		else if (strcmp(id, "put") == 0)
 			hdr->ops.put = lookup_ops(value);
-			if (hdr->ops.put < 0)
-				hdr->ops.put = atoi(value);
-		} else if (strcmp(id, "put") == 0) {
+		else if (strcmp(id, "get") == 0)
 			hdr->ops.get = lookup_ops(value);
-			if (hdr->ops.get < 0)
-				hdr->ops.get = atoi(value);
-		}
 
 		tplg_dbg("\t\t%s = %s\n", id, value);
 	}

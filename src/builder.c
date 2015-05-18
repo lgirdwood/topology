@@ -33,7 +33,7 @@ static void verbose(struct soc_tplg_priv *soc_tplg, const char *fmt, ...)
 
 /* write out block header to output file */
 static int write_block_header(struct soc_tplg_priv *soc_tplg, u32 type,
-	u32 vendor_type, u32 version, u32 index, size_t payload_size)
+	u32 vendor_type, u32 version, u32 index, size_t payload_size, int count)
 {
 	struct snd_soc_tplg_hdr hdr;
 	size_t bytes;
@@ -47,6 +47,8 @@ static int write_block_header(struct soc_tplg_priv *soc_tplg, u32 type,
 	hdr.version = version;
 	hdr.payload_size = payload_size;
 	hdr.index = index;
+	hdr.size = sizeof(hdr);
+	hdr.count = count;
 
 	/* make sure file offset is aligned with the calculated HDR offset */
 	if (offset != soc_tplg->next_hdr_pos) {
@@ -79,11 +81,15 @@ static int write_mixer_block(struct soc_tplg_priv *soc_tplg,
 {
 	struct list_head *pos, *npos;
 	struct soc_tplg_elem *elem;
-	int ret, wsize = 0, count;
+	int ret, wsize = 0, count = 0;
+
+	/* count number of elements */
+	list_for_each_safe(pos, npos, base)
+		count++;
 
 	/* write the header for this block */
 	ret = write_block_header(soc_tplg, SND_SOC_TPLG_TYPE_MIXER, 0,
-		SND_SOC_TPLG_ABI_VERSION, 0, size);
+		SND_SOC_TPLG_ABI_VERSION, 0, size, count);
 	if (ret < 0) {
 		tplg_error("error: failed to write mixer block %d\n", ret);
 		return ret;
@@ -120,11 +126,15 @@ static int write_graph_block(struct soc_tplg_priv *soc_tplg,
 {
 	struct list_head *pos, *npos;
 	struct soc_tplg_elem *elem;
-	int ret, wsize = 0, count;
+	int ret, wsize = 0, count = 0;
+
+	/* count number of elements */
+	list_for_each_safe(pos, npos, base)
+		count++;
 
 	/* write the header for this block */
 	ret = write_block_header(soc_tplg, SND_SOC_TPLG_TYPE_DAPM_GRAPH, 0,
-		SND_SOC_TPLG_ABI_VERSION, 0, size);
+		SND_SOC_TPLG_ABI_VERSION, 0, size, count);
 	if (ret < 0) {
 		tplg_error("failed to write control elems %d\n", ret);
 		return ret;
@@ -161,11 +171,15 @@ static int write_widget_block(struct soc_tplg_priv *soc_tplg,
 {
 	struct list_head *pos, *npos;
 	struct soc_tplg_elem *elem;
-	int ret, wsize = 0, count;
+	int ret, wsize = 0, count = 0;
+
+	/* count number of elements */
+	list_for_each_safe(pos, npos, base)
+		count++;
 
 	/* write the header for this block */
 	ret = write_block_header(soc_tplg, SND_SOC_TPLG_TYPE_DAPM_WIDGET, 0,
-		SND_SOC_TPLG_ABI_VERSION, 0, size);
+		SND_SOC_TPLG_ABI_VERSION, 0, size, count);
 	if (ret < 0) {
 		tplg_error("failed to write control elems %d\n", ret);
 		return ret;
@@ -388,7 +402,7 @@ int socfw_import_vendor(struct soc_tplg_priv *soc_tplg, const char *name,
 
 	verbose(soc_tplg, " vendor: file size is %d bytes\n", size);
 
-	err = write_block_header(soc_tplg, type, 0, 0, 0, size);
+	err = write_block_header(soc_tplg, type, 0, 0, 0, size, 1);
 	if (err < 0)
 		return err;
 
