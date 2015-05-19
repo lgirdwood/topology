@@ -170,6 +170,9 @@ static void elem_free(struct soc_tplg_elem *elem)
 {
 	//printf("free element %s\n", elem->id);
 	free_ref_list(&elem->ref_list);
+	/* TODO: some element type like private_data also needs to free private
+	  * pointer. Define a private free callback for struct struct soc_tplg_elem? */
+
 	free(elem);
 }
 
@@ -208,7 +211,6 @@ struct soc_tplg_priv *socfw_new(const char *name, int verbose)
 	soc_tplg->out_fd = fd;
 
 	INIT_LIST_HEAD(&soc_tplg->tlv_list);
-	INIT_LIST_HEAD(&soc_tplg->control_list);
 	INIT_LIST_HEAD(&soc_tplg->widget_list);
 	INIT_LIST_HEAD(&soc_tplg->pcm_list);
 	INIT_LIST_HEAD(&soc_tplg->be_list);
@@ -218,7 +220,10 @@ struct soc_tplg_priv *socfw_new(const char *name, int verbose)
 	INIT_LIST_HEAD(&soc_tplg->text_list);
 	INIT_LIST_HEAD(&soc_tplg->pcm_config_list);
 	INIT_LIST_HEAD(&soc_tplg->pcm_caps_list);
-
+	INIT_LIST_HEAD(&soc_tplg->mixer_list);
+	INIT_LIST_HEAD(&soc_tplg->enum_list);
+	INIT_LIST_HEAD(&soc_tplg->bytes_ext_list);
+ 
 	return soc_tplg;
 }
 
@@ -227,7 +232,6 @@ void socfw_free(struct soc_tplg_priv *soc_tplg)
 	close(soc_tplg->out_fd);
 
 	free_elem_list(&soc_tplg->tlv_list);
-	free_elem_list(&soc_tplg->control_list);
 	free_elem_list(&soc_tplg->widget_list);
 	free_elem_list(&soc_tplg->pcm_list);
 	free_elem_list(&soc_tplg->be_list);
@@ -237,7 +241,10 @@ void socfw_free(struct soc_tplg_priv *soc_tplg)
 	free_elem_list(&soc_tplg->text_list);
 	free_elem_list(&soc_tplg->pcm_config_list);
 	free_elem_list(&soc_tplg->pcm_caps_list);
-	
+	free_elem_list(&soc_tplg->mixer_list);
+	free_elem_list(&soc_tplg->enum_list);
+	free_elem_list(&soc_tplg->bytes_ext_list);
+
 	free(soc_tplg);
 }
 
@@ -359,6 +366,7 @@ static int parse_data_file(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg,
 	
 	elem->data = priv;
 	priv->size = PATH_MAX;
+	elem->size = sizeof(*priv) + priv->size;
 
 	strncpy(priv->data, value, PATH_MAX);
 	tplg_dbg("\t%s\n", priv->data);
@@ -388,7 +396,7 @@ static int parse_data(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg,
 	if (!elem)
 		return -ENOMEM;
 
-	list_add_tail(&elem->list, &soc_tplg->tlv_list);
+	list_add_tail(&elem->list, &soc_tplg->pdata_list);
 
 	snd_config_get_id(cfg, &id);
 	strncpy(elem->id, id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
@@ -783,7 +791,7 @@ static int parse_control_bytes(struct soc_tplg_priv *soc_tplg,
 	}
 
 	/* add new element to control list */
-	list_add_tail(&elem->list, &soc_tplg->control_list);
+	list_add_tail(&elem->list, &soc_tplg->bytes_ext_list);
 	snd_config_get_id(cfg, &id);
 	strncpy(elem->id, id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
 
@@ -840,6 +848,15 @@ static int parse_control_bytes(struct soc_tplg_priv *soc_tplg,
 			tplg_dbg("\t%s: %d\n", id, be->mask);
 			continue;
 		}
+
+		if (strcmp(id, "data") == 0) {
+			if (snd_config_get_string(n, &val) < 0)
+				return -EINVAL;
+
+			add_ref(elem, PARSER_TYPE_DATA, val);
+			tplg_dbg("\t%s: %s\n", id, val);
+			continue;
+		}
 	}
 
 	return 0;
@@ -888,7 +905,7 @@ static int parse_control_enum(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg,
 	}
 
 	/* add new element to control list */
-	list_add_tail(&elem->list, &soc_tplg->control_list);
+	list_add_tail(&elem->list, &soc_tplg->enum_list);
 	snd_config_get_id(cfg, &id);
 	strncpy(elem->id, id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
 
@@ -1004,7 +1021,7 @@ static int parse_control_mixer(struct soc_tplg_priv *soc_tplg,
 	}
 
 	/* add new element to control list */
-	list_add_tail(&elem->list, &soc_tplg->control_list);
+	list_add_tail(&elem->list, &soc_tplg->mixer_list);
 	snd_config_get_id(cfg, &id);
 	strncpy(elem->id, id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
 
@@ -1087,6 +1104,15 @@ static int parse_control_mixer(struct soc_tplg_priv *soc_tplg,
 			if (err < 0)
 				return err;				
 
+			tplg_dbg("\t%s: %s\n", id, val);
+			continue;
+		}
+
+		if (strcmp(id, "data") == 0) {
+			if (snd_config_get_string(n, &val) < 0)
+				return -EINVAL;
+
+			add_ref(elem, PARSER_TYPE_DATA, val);
 			tplg_dbg("\t%s: %s\n", id, val);
 			continue;
 		}
@@ -1218,6 +1244,14 @@ static int parse_dapm_widget(struct soc_tplg_priv *soc_tplg,
 			continue;		
 		}
 
+		if (strcmp(id, "data") == 0) {
+			if (snd_config_get_string(n, &val) < 0)
+				return -EINVAL;
+
+			add_ref(elem, PARSER_TYPE_DATA, val);
+			tplg_dbg("\t%s: %s\n", id, val);
+			continue;
+		}
 	}
 
 	return 0;
@@ -2230,13 +2264,64 @@ static int check_routes(struct soc_tplg_priv *soc_tplg)
 	return 0;
 }
 
+/* copy private data into the bytes extended control */
+static int copy_data(struct soc_tplg_elem *elem,
+	struct soc_tplg_elem *ref)
+{
+	struct snd_soc_tplg_private *priv;
+
+	if (!ref)
+		return -EINVAL;
+
+	tplg_dbg("Data '%s' used by '%s'\n", ref->id, elem->id);
+
+	switch (elem->type) {
+		case PARSER_TYPE_MIXER:
+			elem->mixer_ctrl = realloc(elem->mixer_ctrl, elem->size + ref->size);
+			if (!elem->mixer_ctrl)
+				return -ENOMEM;
+			priv = &elem->mixer_ctrl->priv;
+			break;
+
+		case PARSER_TYPE_ENUM:
+			elem->enum_ctrl = realloc(elem->enum_ctrl, elem->size + ref->size);
+			if (!elem->enum_ctrl)
+				return -ENOMEM;
+			priv = &elem->enum_ctrl->priv;
+			break;
+
+		case PARSER_TYPE_BYTES:
+			elem->bytes_ext = realloc(elem->bytes_ext, elem->size + ref->size);
+			if (!elem->bytes_ext)
+				return -ENOMEM;
+			priv = &elem->bytes_ext->priv;
+			break;
+
+
+		case PARSER_TYPE_DAPM_WIDGET:
+			elem->widget = realloc(elem->widget, elem->size + ref->size);
+			if (!elem->widget)
+				return -ENOMEM;
+			priv = &elem->widget->priv;
+			break;
+
+		default:
+			tplg_error("elem '%s': type %d shall not have private data\n", elem->id);
+			return -EINVAL;
+	}
+
+	elem->size += ref->size;
+	memcpy(priv, ref->data, ref->size);
+	return 0;
+}
+
 /* copy referenced TLV to the mixer control */
 static int copy_tlv(struct soc_tplg_elem *elem, struct soc_tplg_elem *ref)
 {
 	struct snd_soc_tplg_mixer_control *mixer_ctrl =  elem->mixer_ctrl;
 	struct snd_soc_tplg_ctl_tlv *tlv = ref->tlv;
 
-	tplg_dbg("TLV '%s' uses '%s\n", elem->id, ref->id);
+	tplg_dbg("TLV '%s' used by '%s\n", ref->id, elem->id);
 
 	/* TLV has a fixed size */
 	memcpy(&mixer_ctrl->tlv, tlv, sizeof(*tlv));
@@ -2244,11 +2329,12 @@ static int copy_tlv(struct soc_tplg_elem *elem, struct soc_tplg_elem *ref)
 }
 
 /* check referenced TLV for a mixer control */
-static int check_referenced_tlv(struct soc_tplg_priv *soc_tplg,
+static int check_mixer_control(struct soc_tplg_priv *soc_tplg,
 				struct soc_tplg_elem *elem)
 {
 	struct soc_tplg_ref *ref;
 	struct list_head *base, *pos, *npos;
+	int err = 0;
 
 	base = &elem->ref_list;
 
@@ -2259,15 +2345,24 @@ static int check_referenced_tlv(struct soc_tplg_priv *soc_tplg,
 		if (ref->id == NULL || ref->elem)
 			continue;
 
-		/* see if ref is a TLV */
-		ref->elem = lookup_element(&soc_tplg->tlv_list,
-			ref->id, PARSER_TYPE_TLV);
+		if (ref->type == PARSER_TYPE_TLV) {
+			ref->elem = lookup_element(&soc_tplg->tlv_list,
+						ref->id, PARSER_TYPE_TLV);
+			if(ref->elem)
+				 err = copy_tlv(elem, ref->elem);
+
+		} else if (ref->type == PARSER_TYPE_DATA) {
+			ref->elem = lookup_element(&soc_tplg->pdata_list,
+						ref->id, PARSER_TYPE_DATA);
+			 err = copy_data(elem, ref->elem);
+		}
+
 		if (!ref->elem) {
-			tplg_error("Cannot find tlv '%s' referenced by"
+			tplg_error("Cannot find '%s' referenced by"
 				" control '%s'\n", ref->id, elem->id);
 			return -EINVAL;
-		} else
-			return copy_tlv(elem, ref->elem);
+		} else if (err < 0)
+			return err;
 	}
 
 	return 0;
@@ -2283,11 +2378,12 @@ static void copy_enum_texts(struct soc_tplg_elem *enum_elem,
 }
 
 /* check referenced text for a enum control */
-static int check_referenced_text(struct soc_tplg_priv *soc_tplg,
+static int check_enum_control(struct soc_tplg_priv *soc_tplg,
 				struct soc_tplg_elem *elem)
 {
 	struct soc_tplg_ref *ref;
 	struct list_head *base, *pos, *npos;
+	int err = 0;
 
 	base = &elem->ref_list;
 
@@ -2297,21 +2393,55 @@ static int check_referenced_text(struct soc_tplg_priv *soc_tplg,
 		if (ref->id == NULL || ref->elem)
 			continue;
 
-		ref->elem = lookup_element(&soc_tplg->tlv_list,
-			ref->id, PARSER_TYPE_TEXT);
+		if (ref->type == PARSER_TYPE_TEXT) {
+			ref->elem = lookup_element(&soc_tplg->text_list,
+						ref->id, PARSER_TYPE_TEXT);
+			if (ref->elem)
+				copy_enum_texts(elem, ref->elem);
+
+		} else if (ref->type == PARSER_TYPE_DATA) {
+			ref->elem = lookup_element(&soc_tplg->pdata_list,
+						ref->id, PARSER_TYPE_DATA);
+			err = copy_data(elem, ref->elem);
+		}
 		if (!ref->elem) {
-			tplg_error("Cannot find text '%s' referenced by"
+			tplg_error("Cannot find '%s' referenced by"
 				" control '%s'\n", ref->id, elem->id);
 			return -EINVAL;
-		}
-
-		/* copy texts to enum elem */
-		copy_enum_texts(elem, ref->elem);
+		} else if (err < 0)
+			return err;
 	}
 
 	return 0;
 }
 
+/* check referenced private data for a byte control */
+static int check_bytes_control(struct soc_tplg_priv *soc_tplg,
+				struct soc_tplg_elem *elem)
+{
+	struct soc_tplg_ref *ref;
+	struct list_head *base, *pos, *npos;
+
+	base = &elem->ref_list;
+	list_for_each_safe(pos, npos, base) {
+		ref = list_entry(pos, struct soc_tplg_ref, list);
+		if (ref->id == NULL || ref->elem)
+			continue;
+		/* bytes control only reference one private data section */
+		ref->elem = lookup_element(&soc_tplg->pdata_list,
+			ref->id, PARSER_TYPE_DATA);
+		if (!ref->elem) {
+			tplg_error("Cannot find data '%s' referenced by"
+				" control '%s'\n", ref->id, elem->id);
+			return -EINVAL;
+		}
+
+		/* copy texts to enum elem */
+		return copy_data(elem, ref->elem);
+	}
+
+	return 0;
+}
 
 static int check_controls(struct soc_tplg_priv *soc_tplg)
 {
@@ -2319,16 +2449,26 @@ static int check_controls(struct soc_tplg_priv *soc_tplg)
 	struct soc_tplg_elem *elem;
 	int err = 0;
 
-	base = &soc_tplg->control_list;
-
+	base = &soc_tplg->mixer_list;
 	list_for_each_safe(pos, npos, base) {
-
 		elem = list_entry(pos, struct soc_tplg_elem, list);
+		err = check_mixer_control(soc_tplg, elem);
+		if (err < 0)
+			return err;
+	}
 
-		if (elem->type == PARSER_TYPE_MIXER)
-			err = check_referenced_tlv(soc_tplg, elem);
-		else if (elem->type == PARSER_TYPE_ENUM)
-			err = check_referenced_text(soc_tplg, elem);
+	base = &soc_tplg->enum_list;
+	list_for_each_safe(pos, npos, base) {
+		elem = list_entry(pos, struct soc_tplg_elem, list);
+		err = check_enum_control(soc_tplg, elem);
+		if (err < 0)
+			return err;
+	}
+
+	base = &soc_tplg->bytes_ext_list;
+	list_for_each_safe(pos, npos, base) {
+		elem = list_entry(pos, struct soc_tplg_elem, list);
+		err = check_bytes_control(soc_tplg, elem);
 		if (err < 0)
 			return err;
 	}
@@ -2343,9 +2483,9 @@ static int move_control(struct soc_tplg_elem *elem, struct soc_tplg_elem *ref)
 	struct snd_soc_tplg_mixer_control *mixer_ctrl = ref->mixer_ctrl;
 	struct snd_soc_tplg_enum_control *enum_ctrl = ref->enum_ctrl;
 
-	tplg_dbg("'%s' to '%s' size %d + %d -> %d, priv size -> %d\n",
-		ref->id, elem->id, elem->size, ref->size,
-		elem->size + ref->size, widget->priv.size);
+	tplg_dbg("Control '%s' used by '%s'\n", ref->id, elem->id);
+	tplg_dbg("\tparent size: %d + %d -> %d, priv size -> %d\n",
+		elem->size, ref->size, elem->size + ref->size, widget->priv.size);
 
 	widget = realloc(widget, elem->size + ref->size);
 	if (!widget)
@@ -2368,11 +2508,12 @@ static int move_control(struct soc_tplg_elem *elem, struct soc_tplg_elem *ref)
 }
 
 /* check referenced controls for a widget */
-static int check_referenced_controls(struct soc_tplg_priv *soc_tplg,
+static int check_widget(struct soc_tplg_priv *soc_tplg,
 	struct soc_tplg_elem *elem)
 {
 	struct soc_tplg_ref *ref;
 	struct list_head *base, *pos, *npos;
+	int err = 0;
 
 	base = &elem->ref_list;
 
@@ -2383,24 +2524,36 @@ static int check_referenced_controls(struct soc_tplg_priv *soc_tplg,
 		if (ref->id == NULL || ref->elem)
 			continue;
 
-		ref->elem = lookup_element(&soc_tplg->control_list,
-			ref->id, PARSER_TYPE_MIXER);
+		switch (ref->type) {
+			case PARSER_TYPE_MIXER:
+				ref->elem = lookup_element(&soc_tplg->mixer_list,
+							ref->id, PARSER_TYPE_MIXER);
+				if(ref->elem)
+					err =  move_control(elem, ref->elem);
+				break;
 
-		if (!ref->elem)
-			ref->elem = lookup_element(&soc_tplg->control_list,
-			ref->id, PARSER_TYPE_ENUM);
+			case PARSER_TYPE_ENUM:
+				ref->elem = lookup_element(&soc_tplg->enum_list,
+							ref->id, PARSER_TYPE_ENUM);
+				if(ref->elem)
+					err =  move_control(elem, ref->elem);
+				break;
+
+			case PARSER_TYPE_DATA:
+				ref->elem = lookup_element(&soc_tplg->pdata_list,
+							ref->id, PARSER_TYPE_DATA);
+				err =  copy_data(elem, ref->elem);
+				break;
+			default:
+				break;
+		}
 
 		if (!ref->elem) {
 			tplg_error("Cannot find control '%s' referenced by"
 				" widget '%s'\n", ref->id, elem->id);
 			return -EINVAL;
-		} else {
-			int ret;
-
-			ret = move_control(elem, ref->elem);
-			if (ret < 0)
-				return ret;
-		}
+		} else  if (err < 0) 
+			return err;
 	}
 
 	return 0;
@@ -2422,7 +2575,7 @@ static int check_widgets(struct soc_tplg_priv *soc_tplg)
 			return -EINVAL;
 		}
 
-		err = check_referenced_controls(soc_tplg, elem);
+		err = check_widget(soc_tplg, elem);
 		if (err < 0)
 			return err;
 	}

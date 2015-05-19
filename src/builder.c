@@ -121,6 +121,98 @@ static int write_mixer_block(struct soc_tplg_priv *soc_tplg,
 	return 0;
 }
 
+/* write the enum control list */
+static int write_enum_block(struct soc_tplg_priv *soc_tplg,
+	struct list_head *base, int size)
+{
+	struct list_head *pos, *npos;
+	struct soc_tplg_elem *elem;
+	int ret, wsize = 0, count = 0;
+
+	/* count number of elements */
+	list_for_each_safe(pos, npos, base)
+		count++;
+
+	/* write the header for this block */
+	ret = write_block_header(soc_tplg, SND_SOC_TPLG_TYPE_ENUM, 0,
+		SND_SOC_TPLG_ABI_VERSION, 0, size, count);
+	if (ret < 0) {
+		tplg_error("error: failed to write enum control block %d\n", ret);
+		return ret;
+	}
+
+	/* write each enum control from block */
+	list_for_each_safe(pos, npos, base) {
+
+		elem = list_entry(pos, struct soc_tplg_elem, list);
+		verbose(soc_tplg, " enum '%s': write %d bytes\n",
+			elem->id, elem->size);
+
+		count = write(soc_tplg->out_fd, elem->enum_ctrl, elem->size);
+		if (count < 0) {
+			tplg_error("error: failed to write enum %d\n", ret);
+			return ret;
+		}
+
+		wsize += count;
+	}
+
+	/* make sure we have written the correct size */
+	if (wsize != size) {
+		tplg_error("error: size mismatch. Expected %d wrote %d\n",
+			size, wsize);
+		return -EIO;
+	}
+
+	return 0;
+}
+
+/* write the byte extended control list */
+static int write_bytes_extended_block(struct soc_tplg_priv *soc_tplg,
+	struct list_head *base, int size)
+{
+	struct list_head *pos, *npos;
+	struct soc_tplg_elem *elem;
+	int ret, wsize = 0, count = 0;
+
+	/* count number of elements */
+	list_for_each_safe(pos, npos, base)
+		count++;
+
+	/* write the header for this block */
+	ret = write_block_header(soc_tplg, SND_SOC_TPLG_TYPE_BYTES, 0,
+		SND_SOC_TPLG_ABI_VERSION, 0, size, count);
+	if (ret < 0) {
+		tplg_error("error: failed to write bytes extended block %d\n", ret);
+		return ret;
+	}
+
+	/* write each bytes extended control from block */
+	list_for_each_safe(pos, npos, base) {
+
+		elem = list_entry(pos, struct soc_tplg_elem, list);
+		verbose(soc_tplg, " bytes ext '%s': write %d bytes\n",
+			elem->id, elem->size);
+
+		count = write(soc_tplg->out_fd, elem->bytes_ext, elem->size);
+		if (count < 0) {
+			tplg_error("error: failed to write bytes ext %d\n", ret);
+			return ret;
+		}
+
+		wsize += count;
+	}
+
+	/* make sure we have written the correct size */
+	if (wsize != size) {
+		tplg_error("error: size mismatch. Expected %d wrote %d\n",
+			size, wsize);
+		return -EIO;
+	}
+
+	return 0;
+}
+
 static int write_graph_block(struct soc_tplg_priv *soc_tplg,
 	struct list_head *base, int size)
 {
@@ -471,7 +563,9 @@ static int write_block(struct soc_tplg_priv *soc_tplg, struct list_head *base,
 	case PARSER_TYPE_MIXER:
 		return write_mixer_block(soc_tplg, base, size);
 	case PARSER_TYPE_BYTES:
+		return write_bytes_extended_block(soc_tplg, base, size);
 	case PARSER_TYPE_ENUM:
+		return write_enum_block(soc_tplg, base, size);
 	case PARSER_TYPE_DAPM_GRAPH:
 		return write_graph_block(soc_tplg, base, size);
 	case PARSER_TYPE_DAPM_WIDGET:
@@ -493,9 +587,25 @@ int socfw_write_data(struct soc_tplg_priv *soc_tplg)
 {
 	int ret;
 
-	/* write control elems. */
-	ret = write_block(soc_tplg, &soc_tplg->control_list,
+	/* write mixer elems. */
+	ret = write_block(soc_tplg, &soc_tplg->mixer_list,
 		PARSER_TYPE_MIXER);
+	if (ret < 0) {
+		tplg_error("failed to write control elems %d\n", ret);
+		return ret;
+	}
+
+	/* write enum control elems. */
+	ret = write_block(soc_tplg, &soc_tplg->enum_list,
+		PARSER_TYPE_ENUM);
+	if (ret < 0) {
+		tplg_error("failed to write control elems %d\n", ret);
+		return ret;
+	}
+
+	/* write bytes extended control elems. */
+	ret = write_block(soc_tplg, &soc_tplg->bytes_ext_list,
+		PARSER_TYPE_BYTES);
 	if (ret < 0) {
 		tplg_error("failed to write control elems %d\n", ret);
 		return ret;

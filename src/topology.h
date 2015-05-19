@@ -90,7 +90,6 @@ struct soc_tplg_priv {
 
 	/* list of each element type */
 	struct list_head tlv_list;
-	struct list_head control_list;
 	struct list_head widget_list;
 	struct list_head pcm_list;
 	struct list_head be_list;
@@ -100,6 +99,11 @@ struct soc_tplg_priv {
 	struct list_head pdata_list;
 	struct list_head pcm_config_list;
 	struct list_head pcm_caps_list;
+
+	/* type-specific control lists */
+	struct list_head mixer_list;
+	struct list_head enum_list;
+	struct list_head bytes_ext_list;
 };
 
 /* object text references */
