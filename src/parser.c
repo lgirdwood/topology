@@ -329,26 +329,6 @@ static int lookup_ops(const char *c)
 	return atoi(c);
 }
 
-#if 0
-static int copy_tlv(struct soc_tplg_priv *soc_tplg, const char *tlv_name,
-	struct snd_soc_tplg_ctl_tlv *tlv)
-{
-	struct soc_tplg_elem *tlv_elem;
-
-	tlv_elem = lookup_element(&soc_tplg->tlv_list, tlv_name,
-		PARSER_TYPE_TLV);
-	
-	if (tlv_elem == NULL) {
-		tplg_error("Cannot find tlv '%s'\n", tlv_name);
-		return -EINVAL;
-	}
-
-	memcpy(tlv, tlv_elem->tlv, sizeof(*tlv));
-
-	return 0;
-}
-#endif
-
 static int parse_data_file(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg,
 	struct soc_tplg_elem *elem)
 {
@@ -1923,7 +1903,7 @@ static int parse_line(const char *text,
 
 second:
 	/* find second , */
-	source = buf;
+	sink = buf;
 	control = &buf[i + 2];
 	buf[i] = 0;
 
@@ -1937,7 +1917,7 @@ second:
 
 done:
 	buf[i] = 0;
-	sink = &buf[i + 2];
+	source = &buf[i + 2];
 
 	strcpy(line->source, source);
 	strcpy(line->control, control);
@@ -1967,6 +1947,7 @@ static int parse_routes(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg)
 		list_add_tail(&elem->list, &soc_tplg->route_list);
 		strcpy(elem->id, "line");
 		elem->type = PARSER_TYPE_DAPM_GRAPH;
+		elem->size = sizeof(*line);
 
 		line = calloc(1, sizeof(*line));
 		if (!line)

@@ -237,7 +237,7 @@ static int write_graph_block(struct soc_tplg_priv *soc_tplg,
 
 		elem = list_entry(pos, struct soc_tplg_elem, list);
 		verbose(soc_tplg, " route '%s': start to write %d bytes\n",
-			elem->id, elem->size);
+			elem->route->source, elem->size);
 
 		count = write(soc_tplg->out_fd, elem->route, elem->size);
 		if (count < 0) {		
