@@ -304,6 +304,52 @@ static int write_be_block(struct soc_tplg_priv *soc_tplg,
 	return 0;
 }
 
+static int write_cc_block(struct soc_tplg_priv *soc_tplg,
+	struct list_head *base, int size)
+{
+	struct list_head *pos, *npos;
+	struct soc_tplg_elem *elem;
+	int ret, wsize = 0, count = 0;
+
+	/* count number of elements */
+	list_for_each_safe(pos, npos, base)
+		count++;
+
+	/* jinyao: write SND_SOC_TPLG_TYPE_DAI_LINK correct? */
+	ret = write_block_header(soc_tplg, SND_SOC_TPLG_TYPE_DAI_LINK, 0,
+		SND_SOC_TPLG_ABI_VERSION, 0, size, count);
+	if (ret < 0) {
+		tplg_error("failed to write cc elems %d\n", ret);
+		return ret;
+	}
+
+	/* write each cc from block */
+	list_for_each_safe(pos, npos, base) {
+
+		elem = list_entry(pos, struct soc_tplg_elem, list);
+		verbose(soc_tplg, " cc '%s': start to write %d bytes\n",
+			elem->id, elem->size);
+
+		count = write(soc_tplg->out_fd, elem->cc, elem->size);
+		if (count < 0) {		
+			tplg_error("error: failed to write cc %s %d\n",
+				elem->id, ret);
+			return ret;		
+		}
+
+		wsize += count;
+	}
+
+	/* make sure we have written the correct size */
+	if (wsize != size) {
+		tplg_error("error: size mismatch. Expected %d wrote %d\n",
+			size, wsize);
+		return -EIO;
+	}
+
+	return 0;
+}
+
 #if 0
 static struct soc_tplg_elem *lookup_element(struct list_head *base,
 				const char* id,
@@ -434,6 +480,8 @@ static int write_block(struct soc_tplg_priv *soc_tplg, struct list_head *base,
 		return write_pcm_block(soc_tplg, base, size);
 	case PARSER_TYPE_BE:
 		return write_be_block(soc_tplg, base, size);
+	case PARSER_TYPE_CC:
+		return write_cc_block(soc_tplg, base, size);
 	default:
 		return -EINVAL;
 	}
@@ -474,6 +522,14 @@ int socfw_write_data(struct soc_tplg_priv *soc_tplg)
 		PARSER_TYPE_BE);
 	if (ret < 0) {
 		tplg_error("failed to write be elems %d\n", ret);
+		return ret;
+	}
+
+	/* write cc elems */
+	ret = write_block(soc_tplg, &soc_tplg->cc_list,
+		PARSER_TYPE_CC);
+	if (ret < 0) {
+		tplg_error("failed to write cc elems %d\n", ret);
 		return ret;
 	}
 

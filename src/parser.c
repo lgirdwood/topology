@@ -1524,6 +1524,8 @@ static int parse_pcm_cap_cfg(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg,
 		pcm_dai = elem->pcm;
 	else if (elem->type == PARSER_TYPE_BE)
 		pcm_dai = elem->be;
+	else if (elem->type == PARSER_TYPE_CC)
+		pcm_dai = elem->cc;
 	else
 		return -EINVAL;
 
@@ -1749,6 +1751,107 @@ static int parse_be(struct soc_tplg_priv *soc_tplg,
 		}
 
 		if (strcmp(id, "be") == 0) {
+			err = parse_compound(soc_tplg, n, parse_pcm_cap_cfg,
+				elem);
+			if (err < 0)
+				return err;
+			continue;
+		}
+	}
+
+	return 0;
+}
+
+/* Parse cc
+ *
+ * SectionCC."FM-Codec" {
+ *
+ *	index "1"
+ *
+ *	# used for binding to the CC link
+ *	ID "0"
+ *
+ *	# CC DAI link capabilities and supported configs
+ *	cc."playback" {
+ *
+ *		capabilities "System playback"
+ *
+ *		configs [
+ *			"PCM 48k Stereo 16bit"
+ *		]
+ *	}
+ *
+ *	cc."capture" {
+ *
+ *		capabilities "Analog capture"
+ *
+ *		configs [
+ *			"PCM 48k Stereo 16bit"
+ *		]
+ *	} 
+ * }
+ */
+static int parse_cc(struct soc_tplg_priv *soc_tplg,
+	snd_config_t *cfg, void *private)
+{
+	struct snd_soc_tplg_pcm_dai *pcm_dai;
+	struct soc_tplg_elem *elem;
+	snd_config_iterator_t i, next;
+	snd_config_t *n;
+	const char *id, *val = NULL;
+	int err;
+
+	elem = elem_new();
+	if (!elem)
+		return -ENOMEM;
+
+	pcm_dai = calloc(1, sizeof(*pcm_dai));
+	if (!pcm_dai) {
+		free(elem);
+		return -ENOMEM;
+	}
+
+	list_add_tail(&elem->list, &soc_tplg->cc_list);
+	snd_config_get_id(cfg, &id);
+	strncpy(elem->id, id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
+
+	elem->cc = pcm_dai;
+	elem->type = PARSER_TYPE_CC;
+	elem->size = pcm_dai->size = sizeof(*pcm_dai);
+
+	tplg_dbg(" CC: %s\n", elem->id);
+
+	snd_config_for_each(i, next, cfg) {
+		n = snd_config_iterator_entry(i);
+		if (snd_config_get_id(n, &id) < 0)
+			continue;
+
+		/* skip comments */
+		if (strcmp(id, "comment") == 0)
+			continue;
+		if (id[0] == '#')
+			continue;
+
+		if (strcmp(id, "index") == 0) {
+			if (snd_config_get_string(n, &val) < 0)
+				return -EINVAL;
+
+			/* No "index" defined in struct snd_soc_tplg_pcm_dai now */
+			/* pcm_dai->index = atoi(val); */
+			/* tplg_dbg("\t%s: %d\n", id, pcm_dai->index); */
+			continue;
+		}
+
+		if (strcmp(id, "ID") == 0) {
+			if (snd_config_get_string(n, &val) < 0)
+				return -EINVAL;
+
+			pcm_dai->id = atoi(val);
+			tplg_dbg("\t%s: %d\n", id, pcm_dai->id);
+			continue;
+		}
+
+		if (strcmp(id, "cc") == 0) {
 			err = parse_compound(soc_tplg, n, parse_pcm_cap_cfg,
 				elem);
 			if (err < 0)
@@ -1998,6 +2101,13 @@ static int tplg_parse_config(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg)
 
 		if (strcmp(id, "SectionBE") == 0) {
 			err = parse_compound(soc_tplg, n, parse_be, NULL);
+			if (err < 0)
+				return err;
+			continue;
+		}
+
+		if (strcmp(id, "SectionCC") == 0) {
+			err = parse_compound(soc_tplg, n, parse_cc, NULL);
 			if (err < 0)
 				return err;
 			continue;
@@ -2358,6 +2468,8 @@ static int check_pcm_cfg_caps(struct soc_tplg_priv *soc_tplg,
 		pcm_dai = elem->pcm;
 	else if (elem->type == PARSER_TYPE_BE)
 		pcm_dai = elem->be;
+	else if (elem->type == PARSER_TYPE_CC)
+		pcm_dai = elem->cc;
 	else
 		return -EINVAL;
 
@@ -2431,6 +2543,29 @@ static int check_be(struct soc_tplg_priv *soc_tplg)
 	return 0;
 }
 
+static int check_cc(struct soc_tplg_priv *soc_tplg)
+{
+	struct list_head *base, *pos, *npos;
+	struct soc_tplg_elem *elem;
+	int err = 0;
+
+	base = &soc_tplg->cc_list;
+	list_for_each_safe(pos, npos, base) {
+
+		elem = list_entry(pos, struct soc_tplg_elem, list);
+		if (!elem->cc || elem->type != PARSER_TYPE_CC) {
+			tplg_error("Invalid cc '%s'\n", elem->id);
+			return -EINVAL;
+		}
+
+		err = check_pcm_cfg_caps(soc_tplg, elem);
+		if (err < 0)
+			return err;			
+	}
+
+	return 0;
+}
+
 static int tplg_check_integ(struct soc_tplg_priv *soc_tplg)
 {
 	int err;
@@ -2448,6 +2583,10 @@ static int tplg_check_integ(struct soc_tplg_priv *soc_tplg)
 		return err;
 
 	err = check_be(soc_tplg);
+	if (err <  0)
+		return err;
+
+	err = check_cc(soc_tplg);
 	if (err <  0)
 		return err;
 
