@@ -218,7 +218,6 @@ struct soc_tplg_priv *socfw_new(const char *name, int verbose)
 	INIT_LIST_HEAD(&soc_tplg->text_list);
 	INIT_LIST_HEAD(&soc_tplg->pcm_config_list);
 	INIT_LIST_HEAD(&soc_tplg->pcm_caps_list);
-	INIT_LIST_HEAD(&soc_tplg->pcm_info_list);
 
 	return soc_tplg;
 }
@@ -238,7 +237,6 @@ void socfw_free(struct soc_tplg_priv *soc_tplg)
 	free_elem_list(&soc_tplg->text_list);
 	free_elem_list(&soc_tplg->pcm_config_list);
 	free_elem_list(&soc_tplg->pcm_caps_list);
-	free_elem_list(&soc_tplg->pcm_info_list);
 	
 	free(soc_tplg);
 }
@@ -1237,42 +1235,59 @@ static __le64 lookup_pcm_format(const char *c)
 	return -EINVAL;
 }
 
-/*
- * Parse a stream.
- */
-static int parse_stream(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg,
+static int parse_stream_cfg(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg,
 	void *private)
 {
+	snd_config_iterator_t i, next;
+	snd_config_t *n;
+	struct snd_soc_tplg_stream_config *sc = private;
+	struct snd_soc_tplg_stream *stream;
 	const char *id, *val;
-	struct snd_soc_tplg_stream *stream = private;
 	__le64 format;
+
+	snd_config_get_id(cfg, &id);
+
+	if (strcmp(id, "playback") == 0)
+		stream = &sc->playback;
+	else if (strcmp(id, "capture") == 0)
+		stream = &sc->capture;
+	else
+		return -EINVAL;
+
+	tplg_dbg("\t%s:\n", id);
 
 	stream->size = sizeof(*stream);
 
-	if (snd_config_get_id(cfg, &id) < 0)
-		return -EINVAL;
+	snd_config_for_each(i, next, cfg) {
 
-	if (snd_config_get_string(cfg, &val) < 0)
-		return -EINVAL;
+		n = snd_config_iterator_entry(i);
 
-	if (strcmp(id, "format") == 0) {
-		format = lookup_pcm_format(val);
-		if (format < 0) {
-			tplg_error("Unsupported stream format %s\n", val);
+		if (snd_config_get_id(n, &id) < 0)
 			return -EINVAL;
-		}
+
+		if (snd_config_get_string(n, &val) < 0)
+			return -EINVAL;
+
+		if (strcmp(id, "format") == 0) {
+			format = lookup_pcm_format(val);
+			if (format < 0) {
+				tplg_error("Unsupported stream format %s\n",
+					val);
+				return -EINVAL;
+			}
 		
-		stream->format = format;
-		tplg_dbg("\t\t%s: %s\n", id, val);
-	} else if (strcmp(id, "rate") == 0) {
-		stream->rate = atoi(val);		
-		tplg_dbg("\t\t%s: %d\n", id, stream->rate);
-	} else if (strcmp(id, "channels") == 0) {
-		stream->channels = atoi(val);		
-		tplg_dbg("\t\t%s: %d\n", id, stream->channels);
-	} else if (strcmp(id, "tdm_slot") == 0) {
-		stream->tdm_slot = strtol(val, NULL, 16);
-		tplg_dbg("\t\t%s: 0x%x\n", id, stream->tdm_slot);
+			stream->format = format;
+			tplg_dbg("\t\t%s: %s\n", id, val);
+		} else if (strcmp(id, "rate") == 0) {
+			stream->rate = atoi(val);		
+			tplg_dbg("\t\t%s: %d\n", id, stream->rate);
+		} else if (strcmp(id, "channels") == 0) {
+			stream->channels = atoi(val);		
+			tplg_dbg("\t\t%s: %d\n", id, stream->channels);
+		} else if (strcmp(id, "tdm_slot") == 0) {
+			stream->tdm_slot = strtol(val, NULL, 16);
+			tplg_dbg("\t\t%s: 0x%x\n", id, stream->tdm_slot);
+		}
 	}
 
 	return 0;
@@ -1282,14 +1297,14 @@ static int parse_stream(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg,
  *
  * SectionPCMConfig."PCM config name" {
  *
- *	Playback {
+ *	config."playback" {
  *		format
  *		rate
  *		channels
  *		tdm_slot
  *	}
  *
- *	Capture {
+ *	config."capture" {
  *		format
  *		rate
  *		channels
@@ -1338,21 +1353,9 @@ static int parse_pcm_config(struct soc_tplg_priv *soc_tplg,
 		if (id[0] == '#')
 			continue;
 
-		if (strcmp(id, "Playback") == 0) {
-
-			tplg_dbg("\tPlayback\n");
-			err = parse_compound(soc_tplg, n, parse_stream,
-				&sc->playback);
-			if (err < 0)
-				return err;
-			continue;
-		}
-
-		if (strcmp(id, "Capture") == 0) {
-
-			tplg_dbg("\tCapture\n");
-			err = parse_compound(soc_tplg, n, parse_stream,
-				&sc->capture);
+		if (strcmp(id, "config") == 0) {
+			err = parse_compound(soc_tplg, n, parse_stream_cfg,
+				sc);
 			if (err < 0)
 				return err;
 			continue;
@@ -1362,7 +1365,6 @@ static int parse_pcm_config(struct soc_tplg_priv *soc_tplg,
 	return 0;
 }
 
-#if 0
 static int split_format(struct snd_soc_tplg_stream_caps *caps, char *str)
 {
 	char *s = NULL;
@@ -1385,86 +1387,15 @@ static int split_format(struct snd_soc_tplg_stream_caps *caps, char *str)
 	return 0;
 }
 
-
-/*
- * Parse a stream capabilities
- */
-static int parse_caps(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg,
-	void *private)
-{
-	const char *id, *val;
-	struct snd_soc_tplg_stream_caps *caps = private;
-	char *s;
-	int err;
-
-	caps->size = sizeof(*caps);
-
-	if (snd_config_get_id(cfg, &id) < 0)
-		return -EINVAL;
-
-	if (snd_config_get_string(cfg, &val) < 0)
-		return -EINVAL;
-
-	if (strcmp(id, "formats") == 0) {
-		s = strdup(val);
-		if (s == NULL)
-			return -ENOMEM;
-
-		err = split_format(caps, s);
-		if (err < 0)
-			return err;
-
-		free(s);		
-		tplg_dbg("\t\t%s: %s\n", id, val);
-	} else if (strcmp(id, "rate_min") == 0) {
-		caps->rate_min = atoi(val);
-		tplg_dbg("\t\t%s: %d\n", id, caps->rate_min);
-	} else if (strcmp(id, "rate_max") == 0) {
-		caps->rate_max = atoi(val);
-		tplg_dbg("\t\t%s: %d\n", id, caps->rate_max);
-	} else if (strcmp(id, "channels_min") == 0) {
-		caps->channels_min = atoi(val);
-		tplg_dbg("\t\t%s: %d\n", id, caps->channels_min);
-	} else if (strcmp(id, "channels_max") == 0) {
-		caps->channels_max = atoi(val);
-		tplg_dbg("\t\t%s: %d\n", id, caps->channels_max);
-	}
-
-	return 0;
-}
-
-/*
- * Stream Capabilities
- */
-struct snd_soc_tplg_stream_caps {
-	__le32 size;		/* in bytes of this structure */
-	char name[SNDRV_CTL_ELEM_ID_NAME_MAXLEN];
-	__le64 formats[SND_SOC_TPLG_MAX_FORMATS];	/* supported formats SNDRV_PCM_FMTBIT_* */
-	__le32 rates;		/* supported rates SNDRV_PCM_RATE_* */
-	__le32 rate_min;	/* min rate */
-	__le32 rate_max;	/* max rate */
-	__le32 channels_min;	/* min channels */
-	__le32 channels_max;	/* max channels */
-	__le32 periods_min;	/* min number of periods */
-	__le32 periods_max;	/* max number of periods */
-	__le32 period_size_min;	/* min period size bytes */
-	__le32 period_size_max;	/* max period size bytes */
-	__le32 buffer_size_min;	/* min buffer size bytes */
-	__le32 buffer_size_max;	/* max buffer size bytes */ 
-} __attribute__((packed));
-
-
 /* Parse pcm Capabilities
  *
  * SectionPCMCapabilities." PCM capabilities name" {
  *
- *	Capabilities {
- *		formats "S24_LE, S16_LE"
- *		rate_min "48000"
- *		rate_max "48000"
- *		channels_min "2"
- *		channels_max "2"
- *	}
+ *	formats "S24_LE,S16_LE"
+ *	rate_min "48000"
+ *	rate_max "48000"
+ *	channels_min "2"
+ *	channels_max "2"
  * } 
  */
 static int parse_pcm_caps(struct soc_tplg_priv *soc_tplg,
@@ -1474,7 +1405,8 @@ static int parse_pcm_caps(struct soc_tplg_priv *soc_tplg,
 	struct soc_tplg_elem *elem;
 	snd_config_iterator_t i, next;
 	snd_config_t *n;
-	const char *id;
+	const char *id, *val;
+	char *s;
 	int err;
 
 	elem = elem_new();
@@ -1494,7 +1426,7 @@ static int parse_pcm_caps(struct soc_tplg_priv *soc_tplg,
 	sc->size = sizeof(*sc);
 	elem->stream_caps = sc;
 	elem->type = PARSER_TYPE_STREAM_CAPS;
-	strncpy(sc->name, elem->id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);	
+	strncpy(sc->name, elem->id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
 
 	tplg_dbg(" PCM Capabilities: %s\n", elem->id);
 
@@ -1509,100 +1441,127 @@ static int parse_pcm_caps(struct soc_tplg_priv *soc_tplg,
 		if (id[0] == '#')
 			continue;
 
-		if (strcmp(id, "Capabilities") == 0) {
+		if (snd_config_get_string(n, &val) < 0)
+			return -EINVAL;
 
-			tplg_dbg("\tCapabilities\n");
-			err = parse_compound(soc_tplg, n, parse_caps, sc);
+		if (strcmp(id, "formats") == 0) {
+			s = strdup(val);
+			if (s == NULL)
+				return -ENOMEM;
+
+			err = split_format(sc, s);
+			free(s);		
+
 			if (err < 0)
 				return err;
-			continue;
+
+			tplg_dbg("\t\t%s: %s\n", id, val);
+		} else if (strcmp(id, "rate_min") == 0) {
+			sc->rate_min = atoi(val);
+			tplg_dbg("\t\t%s: %d\n", id, sc->rate_min);
+		} else if (strcmp(id, "rate_max") == 0) {
+			sc->rate_max = atoi(val);
+			tplg_dbg("\t\t%s: %d\n", id, sc->rate_max);
+		} else if (strcmp(id, "channels_min") == 0) {
+			sc->channels_min = atoi(val);
+			tplg_dbg("\t\t%s: %d\n", id, sc->channels_min);
+		} else if (strcmp(id, "channels_max") == 0) {
+			sc->channels_max = atoi(val);
+			tplg_dbg("\t\t%s: %d\n", id, sc->channels_max);
 		}
 	}
 
 	return 0;	
 }
 
-struct snd_soc_tplg_pcm_cap_config_priv {
-	struct snd_soc_tplg_pcm_cap_config *cc;
-	struct soc_tplg_elem *elem;
-};
-
-static int split_config(struct snd_soc_tplg_pcm_cap_config *cc, char *str,
-	struct soc_tplg_elem *elem)
-{
-	char *s;
-	int err, i = 0;
-
-	s = strtok(str, ",");
-	while ((s != NULL) && (i < SND_SOC_TPLG_MAX_CONFIG)) {
-		strncpy(cc->config_names[i], s, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
-
-		err = add_ref(elem, s);
-		if (err < 0)
-			return err;
-
-		tplg_dbg("\t\tConfig: %s\n", cc->config_names[i]);
-		s = strtok(NULL, ",");
-		i++;
-	}
-
-	cc->config_num = i;
-	
-	return 0;
-}
-
-/*
- * Parse PCM capabilities and configs
- */
-static int parse_pcm_cap_config(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg,
+static int parse_pcm_cfg(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg,
 	void *private)
 {
-	const char *id, *val;
-	struct snd_soc_tplg_pcm_cap_config_priv *priv = private;
-	struct snd_soc_tplg_pcm_cap_config *cc = priv->cc;
-	struct soc_tplg_elem *elem = priv->elem;
-	int err = 0;
-	char *s;
+	struct snd_soc_tplg_pcm_cfg_caps *capconf = private;
+	struct snd_soc_tplg_stream_config *configs = capconf->configs;
+	__le32 *num_configs = &capconf->num_configs;
+	const char *value;
 
-	if (snd_config_get_id(cfg, &id) < 0)
+	if (*num_configs == SND_SOC_TPLG_STREAM_CONFIG_MAX)
 		return -EINVAL;
+	
+	if (snd_config_get_string(cfg, &value) < 0)
+		return EINVAL;
 
-	if (snd_config_get_string(cfg, &val) < 0)
-		return -EINVAL;
+	strncpy(configs[*num_configs].name, value,
+		SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
 
-	if (strcmp(id, "Capabilities") == 0) {
-		strncpy(cc->caps_name, val, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
-		err = add_ref(elem, val);
-		if (err < 0)
-			return err;
+	*num_configs += 1;
 
-		tplg_dbg("\t\t%s: %s\n", id, val);
-	} else if (strcmp(id, "Config") == 0) {
-		s = strdup(val);
-		if (s == NULL)
-			return -ENOMEM;
-
-		err = split_config(cc, s, elem);
-		free(s);
-
-		if (err < 0)
-			return err;
-	}
+	tplg_dbg("\t\t%s\n", value);
 
 	return 0;
 }
 
-struct snd_soc_tplg_pcm_dai {
-	__le32 size;		/* in bytes of this structure */
-	char name[SNDRV_CTL_ELEM_ID_NAME_MAXLEN];
-	__le32 id;			/* unique ID - used to match */
-	__le32 playback;		/* supports playback mode */
-	__le32 capture;			/* supports capture mode */
-	__le32 compress;		/* 1 = compressed; 0 = PCM */
-	__le32 num_configs;		/* number of configs */
-	struct snd_soc_tplg_stream_caps caps[2];	/* capabilities */
-	struct snd_soc_tplg_stream_config config[0];	/* supported SW/FW configs */
-}__attribute__((packed));
+/* Parse the cap and config of a pcm.
+ *
+ * pcm."name" {
+ *
+ *		capabilities "System playback"
+ *
+ *		configs [
+ *			"PCM 48k Stereo 24bit"
+ *			"PCM 48k Stereo 16bit"
+ *		]
+ * }
+ */
+static int parse_pcm_cap_cfg(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg,
+	void *private)
+{
+	snd_config_iterator_t i, next;
+	snd_config_t *n;
+	struct soc_tplg_elem *elem = private;
+	struct snd_soc_tplg_pcm_dai *pcm_dai = elem->pcm;
+	const char *id, *value;
+	int err, stream;
+
+	snd_config_get_id(cfg, &id);
+
+	tplg_dbg("\t%s:\n", id);
+	
+	if (strcmp(id, "playback") == 0)
+		stream = SND_SOC_TPLG_STREAM_PLAYBACK;
+	else if (strcmp(id, "capture") == 0)
+		stream = SND_SOC_TPLG_STREAM_CAPTURE;
+	else
+		return -EINVAL;
+
+	snd_config_for_each(i, next, cfg) {
+
+		n = snd_config_iterator_entry(i);
+
+		/* get id */
+		if (snd_config_get_id(n, &id) < 0)
+			continue;
+
+		if (strcmp(id, "capabilities") == 0) {
+			if (snd_config_get_string(n, &value) < 0)
+				continue;
+
+			strncpy(pcm_dai->capconf[stream].caps.name, value,
+				SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
+
+			tplg_dbg("\t\t%s: '%s'\n", id, value);
+			continue;
+		}
+
+		if (strcmp(id, "configs") == 0) {
+			tplg_dbg("\tconfigs:\n");
+			err = parse_compound(soc_tplg, n, parse_pcm_cfg,
+				&pcm_dai->capconf[stream]);
+			if (err < 0)
+				return err;
+			continue;			
+		}
+	}
+
+	return 0;
+}
 
 /* Parse pcm
  *
@@ -1613,50 +1572,47 @@ struct snd_soc_tplg_pcm_dai {
  *	# used for binding to the PCM
  *	ID "0"
  *
- *	Playback {
- *		Capabilities "System Playback"
- *		Config "PCM 48k Stereo 24bit"
- *		Config "PCM 48k Stereo 16bit"
+ *	pcm."playback" {
+ *		capabilities "System Playback"
+ *		config "PCM 48k Stereo 24bit"
+ *		config "PCM 48k Stereo 16bit"
  *	}
  *
- *	Capture {
- *		Capabilities "Analog Capture"
- *		Config "PCM 48k Stereo 24bit"
- *		Config "PCM 48k Stereo 16bit"
- *		Config "PCM 48k 2P/4C 16bit"
+ *	pcm."capture" {
+ *		capabilities "Analog Capture"
+ *		config "PCM 48k Stereo 24bit"
+ *		config "PCM 48k Stereo 16bit"
+ *		config "PCM 48k 2P/4C 16bit"
  *	}
  * }
  */
 static int parse_pcm(struct soc_tplg_priv *soc_tplg,
 	snd_config_t *cfg, void *private)
 {
-	struct snd_soc_tplg_pcm_info *pcm;
+	struct snd_soc_tplg_pcm_dai *pcm_dai;
 	struct soc_tplg_elem *elem;
 	snd_config_iterator_t i, next;
 	snd_config_t *n;
 	const char *id, *val = NULL;
 	int err;
-	struct snd_soc_tplg_pcm_cap_config_priv priv;
 
 	elem = elem_new();
 	if (!elem)
 		return -ENOMEM;
 
-	pcm = calloc(1, sizeof(*pcm));
-	if (!pcm) {
+	pcm_dai = calloc(1, sizeof(*pcm_dai));
+	if (!pcm_dai) {
 		free(elem);
 		return -ENOMEM;
 	}
 
-	list_add_tail(&elem->list, &soc_tplg->pcm_info_list);
+	list_add_tail(&elem->list, &soc_tplg->pcm_list);
 	snd_config_get_id(cfg, &id);
 	strncpy(elem->id, id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
 
-	elem->pcm_info = pcm;
-	elem->type = PARSER_TYPE_PCM_INFO;
-	strncpy(pcm->name, elem->id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
-	pcm->size = sizeof(*pcm);
-	priv.elem = elem;
+	elem->pcm = pcm_dai;
+	elem->type = PARSER_TYPE_PCM;
+	elem->size = pcm_dai->size = sizeof(*pcm_dai);
 
 	tplg_dbg(" PCM: %s\n", elem->id);
 
@@ -1675,8 +1631,9 @@ static int parse_pcm(struct soc_tplg_priv *soc_tplg,
 			if (snd_config_get_string(n, &val) < 0)
 				return -EINVAL;
 
-			pcm->index = atoi(val);
-			tplg_dbg("\t%s: %d\n", id, pcm->index);
+			/* No "index" defined in struct snd_soc_tplg_pcm_dai now */
+			/* pcm_dai->index = atoi(val); */
+			/* tplg_dbg("\t%s: %d\n", id, pcm_dai->index); */
 			continue;
 		}
 
@@ -1684,30 +1641,14 @@ static int parse_pcm(struct soc_tplg_priv *soc_tplg,
 			if (snd_config_get_string(n, &val) < 0)
 				return -EINVAL;
 
-			pcm->id = atoi(val);
-			tplg_dbg("\t%s: %d\n", id, pcm->id);
+			pcm_dai->id = atoi(val);
+			tplg_dbg("\t%s: %d\n", id, pcm_dai->id);
 			continue;
 		}
 
-		if (strcmp(id, "Playback") == 0) {
-
-			tplg_dbg("\tPlayback\n");
-			
-			priv.cc = &pcm->playback;
-			err = parse_compound(soc_tplg, n, parse_pcm_cap_config,
-				&priv);
-			if (err < 0)
-				return err;
-			continue;
-		}
-
-		if (strcmp(id, "Capture") == 0) {
-
-			tplg_dbg("\tCapture\n");
-
-			priv.cc = &pcm->capture;
-			err = parse_compound(soc_tplg, n, parse_pcm_cap_config,
-				&priv);
+		if (strcmp(id, "pcm") == 0) {
+			err = parse_compound(soc_tplg, n, parse_pcm_cap_cfg,
+				elem);
 			if (err < 0)
 				return err;
 			continue;
@@ -1716,7 +1657,6 @@ static int parse_pcm(struct soc_tplg_priv *soc_tplg,
 
 	return 0;
 }
-#endif
 
 /* line is defined as '"source, control, sink"' */
 static int parse_line(const char *text,
@@ -1841,118 +1781,6 @@ static int parse_dapm_graph(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg,
 	return 0;
 }
 
-static int parse_pcm_dai_stream(snd_config_t *cfg, struct soc_tplg_elem *elem,
-	int stream_dir)
-{
-	snd_config_iterator_t i, next;
-	snd_config_t *n;
-	int err, idx = 0;
-	const char *key = NULL, *val = NULL;
-	struct snd_soc_tplg_pcm_dai *pcm_dai = elem->pcm;
-
-	pcm_dai->size = sizeof(*pcm_dai);
-
-	if (snd_config_get_type(cfg) != SND_CONFIG_TYPE_COMPOUND) {
-		tplg_error("error: compound is expected for stream definition\n");
-		return -EINVAL;
-	}
-
-	snd_config_for_each(i, next, cfg) {
-		const char *id;
-		idx ^= 1;
-		n = snd_config_iterator_entry(i);
-		err = snd_config_get_id(n, &id);
-		if (err < 0)
-			continue;
-
-		if (snd_config_get_type(n) != SND_CONFIG_TYPE_STRING) {
-			tplg_error("error: string type is expected for stream members");
-			return -EINVAL;
-		}
-
-		if (idx == 1) {
-			snd_config_get_string(n, &key);
-			continue;
-		}
-
-		if(snd_config_get_string(n, &val) < 0) {
-			tplg_error("pcm_dai %s: invalid '%s' definition\n", elem->id, key);
-			return -EINVAL;
-		}
-
-		if (strcmp(key, "stream_name") == 0) {
-			if (stream_dir == SNDRV_PCM_STREAM_PLAYBACK)
-				strncpy(pcm_dai->caps[0].name, val, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
-			else
-				strncpy(pcm_dai->caps[1].name, val, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
-		}
-	}
-
-	return 0;
-}
-
-static int parse_pcm_dai(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg,
-	void *private)
-{
-	snd_config_iterator_t i, next;
-	snd_config_t *n;
-	const char *id;
-	int err = 0;
-	struct soc_tplg_elem *elem;
-	struct snd_soc_tplg_pcm_dai *pcm_dai;
-
-	if (snd_config_get_type(cfg) != SND_CONFIG_TYPE_COMPOUND) {
-		tplg_error("error: compound is expected for pcm_dai definition\n");
-		return -EINVAL;
-	}
-
-	elem = elem_new();
-	if (!elem)
-		return -ENOMEM;
-
-	list_add_tail(&elem->list, &soc_tplg->pcm_list);
-	snd_config_get_id(cfg, &id);
-	strncpy(elem->id, id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
-
-	pcm_dai = calloc(1, sizeof(*pcm_dai));
-	if (!pcm_dai)
-		return -ENOMEM;
-	elem->pcm = pcm_dai;
-	elem->type = PARSER_TYPE_PCM;
-	pcm_dai->size = sizeof(pcm_dai);
-
-	printf("find pcm_dai '%s'\n", elem->id);
-
-	snd_config_for_each(i, next, cfg) {
-		n = snd_config_iterator_entry(i);
-		if (snd_config_get_id(n, &id) < 0) {
-			continue;
-		}
-
-		if (strcmp(id, "Playback") == 0) {
-			err = parse_pcm_dai_stream(n, elem,
-				SNDRV_PCM_STREAM_PLAYBACK);
-			if (err < 0) {
-				tplg_error("error: failed to parse FE playback");
-				return err;
-			}
-			continue;
-		}
-
-		if (strcmp(id, "Capture") == 0) {
-			err = parse_pcm_dai_stream(n, elem,
-				SNDRV_PCM_STREAM_CAPTURE);
-			if (err < 0) {
-				tplg_error("error: failed to parse FE capture");
-				return err;
-			}
-			continue;
-		}
-	}
-
-	return 0;
-}
-
 /*
  * Parse compound
  */
@@ -2051,7 +1879,7 @@ static int tplg_parse_config(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg)
 				return err;
 			continue;
 		}
-#if 0
+
 		if (strcmp(id, "SectionPCMCapabilities") == 0) {
 			err = parse_compound(soc_tplg, n, parse_pcm_caps, NULL);
 			if (err < 0)
@@ -2065,16 +1893,9 @@ static int tplg_parse_config(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg)
 				return err;
 			continue;
 		}
-#endif
+
 		if (strcmp(id, "SectionGraph") == 0) {
 			err = parse_compound(soc_tplg, n, parse_dapm_graph, NULL);
-			if (err < 0)
-				return err;
-			continue;
-		}
-
-		if (strcmp(id, "SectionFe") == 0) {
-			err = parse_compound(soc_tplg, n, parse_pcm_dai, NULL);
 			if (err < 0)
 				return err;
 			continue;
@@ -2390,6 +2211,87 @@ static int check_widgets(struct soc_tplg_priv *soc_tplg)
 	return 0;
 }
 
+/* copy referenced caps to the pcm */
+static void copy_pcm_caps(const char *id, struct snd_soc_tplg_stream_caps *caps,
+	struct soc_tplg_elem *ref_elem)
+{
+	struct snd_soc_tplg_stream_caps *ref_caps = ref_elem->stream_caps;
+
+	tplg_dbg("Copy pcm caps (%d bytes) from '%s' to '%s' \n",
+		sizeof(*caps), ref_elem->id, id);
+
+	memcpy((void*)caps, ref_caps, sizeof(*caps));
+}
+
+/* copy referenced config to the pcm */
+static void copy_pcm_config(const char *id,
+	struct snd_soc_tplg_stream_config *cfg,
+	struct soc_tplg_elem *ref_elem)
+{
+	struct snd_soc_tplg_stream_config *ref_cfg = ref_elem->stream_cfg;
+
+	tplg_dbg("Copy pcm config (%d bytes) from '%s' to '%s' \n",
+		sizeof(*cfg), ref_elem->id, id);
+
+	memcpy((void*)cfg, ref_cfg, sizeof(*cfg));
+}
+
+/* check referenced config and caps for a pcm */
+static int check_pcm_cfg_caps(struct soc_tplg_priv *soc_tplg,
+	struct soc_tplg_elem *elem)
+{
+	struct snd_soc_tplg_pcm_dai *pcm_dai = elem->pcm;
+	struct soc_tplg_elem *ref_elem = NULL;
+	struct snd_soc_tplg_pcm_cfg_caps *capconf;
+	int i, j;
+	
+	for (i = 0; i < 2; i++) {
+		capconf = &pcm_dai->capconf[i];
+
+		ref_elem = lookup_element(&soc_tplg->pcm_caps_list,
+			capconf->caps.name, PARSER_TYPE_STREAM_CAPS);
+
+		if (ref_elem != NULL)
+			copy_pcm_caps(elem->id, &capconf->caps, ref_elem);
+
+		for (j = 0; j < capconf->num_configs; j++) {
+			ref_elem = lookup_element(&soc_tplg->pcm_config_list,
+				capconf->configs[j].name,
+				PARSER_TYPE_STREAM_CONFIG);
+
+			if (ref_elem != NULL)
+				copy_pcm_config(elem->id,
+					&capconf->configs[j],
+					ref_elem);
+		}
+	}
+
+	return 0;
+}
+
+static int check_pcm(struct soc_tplg_priv *soc_tplg)
+{
+	struct list_head *base, *pos, *npos;
+	struct soc_tplg_elem *elem;
+	int err = 0;
+
+	base = &soc_tplg->pcm_list;
+	list_for_each_safe(pos, npos, base) {
+
+		elem = list_entry(pos, struct soc_tplg_elem, list);
+		if (!elem->pcm || elem->type != PARSER_TYPE_PCM) {
+			tplg_error("Invalid pcm '%s'\n", elem->id);
+			return -EINVAL;
+		}
+
+		err = check_pcm_cfg_caps(soc_tplg, elem);
+		if (err < 0)
+			return err;			
+	}
+
+	return 0;
+}
+
 static int tplg_check_integ(struct soc_tplg_priv *soc_tplg)
 {
 	int err;
@@ -2399,6 +2301,10 @@ static int tplg_check_integ(struct soc_tplg_priv *soc_tplg)
 		return err;
 
 	err = check_widgets(soc_tplg);
+	if (err <  0)
+		return err;
+
+	err = check_pcm(soc_tplg);
 	if (err <  0)
 		return err;
 

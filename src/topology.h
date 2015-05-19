@@ -98,7 +98,6 @@ struct soc_tplg_priv {
 	struct list_head pdata_list;
 	struct list_head pcm_config_list;
 	struct list_head pcm_caps_list;
-	struct list_head pcm_info_list;
 };
 
 /* object text references */
@@ -134,7 +133,6 @@ struct soc_tplg_elem {
 		struct snd_soc_tplg_dapm_graph_elem *route;
 		struct snd_soc_tplg_stream_config *stream_cfg;
 		struct snd_soc_tplg_stream_caps *stream_caps;
-		struct snd_soc_tplg_pcm_info *pcm_info;
 
 		/* these do not map to UAPI structs but are internal only */
 		struct snd_soc_tplg_ctl_tlv *tlv;
