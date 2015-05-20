@@ -2593,19 +2593,24 @@ static void copy_pcm_config(const char *id,
 static int check_pcm_cfg_caps(struct soc_tplg_priv *soc_tplg,
 	struct soc_tplg_elem *elem)
 {
-	struct snd_soc_tplg_pcm_dai *pcm_dai;
 	struct soc_tplg_elem *ref_elem = NULL;
 	struct snd_soc_tplg_pcm_cfg_caps *capconf;
+	struct snd_soc_tplg_pcm_dai *pcm_dai;
 	int i, j;
 
-	if (elem->type == PARSER_TYPE_PCM)
+	switch (elem->type) {
+	case PARSER_TYPE_PCM:
 		pcm_dai = elem->pcm;
-	else if (elem->type == PARSER_TYPE_BE)
+		break;	
+	case PARSER_TYPE_BE:
 		pcm_dai = elem->be;
-	else if (elem->type == PARSER_TYPE_CC)
+		break;
+	case PARSER_TYPE_CC:
 		pcm_dai = elem->cc;
-	else
+		break;
+	default:
 		return -EINVAL;
+	}
 
 	for (i = 0; i < 2; i++) {
 		capconf = &pcm_dai->capconf[i];
@@ -2631,64 +2636,31 @@ static int check_pcm_cfg_caps(struct soc_tplg_priv *soc_tplg,
 	return 0;
 }
 
-static int check_pcm(struct soc_tplg_priv *soc_tplg)
+static int check_pcm_dai(struct soc_tplg_priv *soc_tplg, int type)
 {
 	struct list_head *base, *pos, *npos;
 	struct soc_tplg_elem *elem;
 	int err = 0;
 
-	base = &soc_tplg->pcm_list;
-	list_for_each_safe(pos, npos, base) {
-
-		elem = list_entry(pos, struct soc_tplg_elem, list);
-		if (!elem->pcm || elem->type != PARSER_TYPE_PCM) {
-			tplg_error("Invalid pcm '%s'\n", elem->id);
-			return -EINVAL;
-		}
-
-		err = check_pcm_cfg_caps(soc_tplg, elem);
-		if (err < 0)
-			return err;			
+	switch (type) {
+	case PARSER_TYPE_PCM:
+		base = &soc_tplg->pcm_list;
+		break;	
+	case PARSER_TYPE_BE:
+		base = &soc_tplg->be_list;
+		break;
+	case PARSER_TYPE_CC:
+		base = &soc_tplg->cc_list;
+		break;
+	default:
+		return -EINVAL;
 	}
 
-	return 0;
-}
-
-static int check_be(struct soc_tplg_priv *soc_tplg)
-{
-	struct list_head *base, *pos, *npos;
-	struct soc_tplg_elem *elem;
-	int err = 0;
-
-	base = &soc_tplg->be_list;
 	list_for_each_safe(pos, npos, base) {
 
 		elem = list_entry(pos, struct soc_tplg_elem, list);
-		if (!elem->be || elem->type != PARSER_TYPE_BE) {
-			tplg_error("Invalid be '%s'\n", elem->id);
-			return -EINVAL;
-		}
-
-		err = check_pcm_cfg_caps(soc_tplg, elem);
-		if (err < 0)
-			return err;			
-	}
-
-	return 0;
-}
-
-static int check_cc(struct soc_tplg_priv *soc_tplg)
-{
-	struct list_head *base, *pos, *npos;
-	struct soc_tplg_elem *elem;
-	int err = 0;
-
-	base = &soc_tplg->cc_list;
-	list_for_each_safe(pos, npos, base) {
-
-		elem = list_entry(pos, struct soc_tplg_elem, list);
-		if (!elem->cc || elem->type != PARSER_TYPE_CC) {
-			tplg_error("Invalid cc '%s'\n", elem->id);
+		if (elem->type != type) {
+			tplg_error("Invalid elem '%s'\n", elem->id);
 			return -EINVAL;
 		}
 
@@ -2712,15 +2684,15 @@ static int tplg_check_integ(struct soc_tplg_priv *soc_tplg)
 	if (err <  0)
 		return err;
 
-	err = check_pcm(soc_tplg);
+	err = check_pcm_dai(soc_tplg, PARSER_TYPE_PCM);
 	if (err <  0)
 		return err;
 
-	err = check_be(soc_tplg);
+	err = check_pcm_dai(soc_tplg, PARSER_TYPE_BE);
 	if (err <  0)
 		return err;
 
-	err = check_cc(soc_tplg);
+	err = check_pcm_dai(soc_tplg, PARSER_TYPE_CC);
 	if (err <  0)
 		return err;
 
