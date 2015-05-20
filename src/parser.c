@@ -779,6 +779,7 @@ static int parse_control_bytes(struct soc_tplg_priv *soc_tplg,
 	elem->type = PARSER_TYPE_BYTES;
 	elem->size = be->size = sizeof(struct snd_soc_tplg_bytes_control);
 	strncpy(be->hdr.name, elem->id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
+	be->hdr.type =  SND_SOC_TPLG_TYPE_BYTES;
 	
 	tplg_dbg(" Control Bytes: %s\n", elem->id);
 
@@ -895,6 +896,7 @@ static int parse_control_enum(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg,
 	strncpy(ec->hdr.name, elem->id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);	
 	ec->hdr.access = SNDRV_CTL_ELEM_ACCESS_TLV_READ |
 		SNDRV_CTL_ELEM_ACCESS_READWRITE;
+	ec->hdr.type =  SND_SOC_TPLG_TYPE_ENUM;
 	elem->size = ec->size = sizeof(*ec);
 
 	tplg_dbg(" Control Enum: %s\n", elem->id);
@@ -1011,6 +1013,7 @@ static int parse_control_mixer(struct soc_tplg_priv *soc_tplg,
 	strncpy(mc->hdr.name, elem->id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);	
 	mc->hdr.access = SNDRV_CTL_ELEM_ACCESS_TLV_READ |
 		SNDRV_CTL_ELEM_ACCESS_READWRITE;
+	mc->hdr.type =  SND_SOC_TPLG_TYPE_MIXER;
 	elem->size = mc->size = sizeof(*mc);
 
 	tplg_dbg(" Control Mixer: %s\n", elem->id);
