@@ -2250,29 +2250,31 @@ static int copy_data(struct soc_tplg_elem *elem,
 	struct soc_tplg_elem *ref)
 {
 	struct snd_soc_tplg_private *priv;
+	int priv_data_size;
 
 	if (!ref)
 		return -EINVAL;
 
 	tplg_dbg("Data '%s' used by '%s'\n", ref->id, elem->id);
+	priv_data_size = ref->data->size;
 
 	switch (elem->type) {
 		case PARSER_TYPE_MIXER:
-			elem->mixer_ctrl = realloc(elem->mixer_ctrl, elem->size + ref->size);
+			elem->mixer_ctrl = realloc(elem->mixer_ctrl, elem->size + priv_data_size);
 			if (!elem->mixer_ctrl)
 				return -ENOMEM;
 			priv = &elem->mixer_ctrl->priv;
 			break;
 
 		case PARSER_TYPE_ENUM:
-			elem->enum_ctrl = realloc(elem->enum_ctrl, elem->size + ref->size);
+			elem->enum_ctrl = realloc(elem->enum_ctrl, elem->size + priv_data_size);
 			if (!elem->enum_ctrl)
 				return -ENOMEM;
 			priv = &elem->enum_ctrl->priv;
 			break;
 
 		case PARSER_TYPE_BYTES:
-			elem->bytes_ext = realloc(elem->bytes_ext, elem->size + ref->size);
+			elem->bytes_ext = realloc(elem->bytes_ext, elem->size + priv_data_size);
 			if (!elem->bytes_ext)
 				return -ENOMEM;
 			priv = &elem->bytes_ext->priv;
@@ -2280,7 +2282,7 @@ static int copy_data(struct soc_tplg_elem *elem,
 
 
 		case PARSER_TYPE_DAPM_WIDGET:
-			elem->widget = realloc(elem->widget, elem->size + ref->size);
+			elem->widget = realloc(elem->widget, elem->size + priv_data_size);
 			if (!elem->widget)
 				return -ENOMEM;
 			priv = &elem->widget->priv;
@@ -2291,8 +2293,9 @@ static int copy_data(struct soc_tplg_elem *elem,
 			return -EINVAL;
 	}
 
-	elem->size += ref->size;
-	memcpy(priv, ref->data, ref->size);
+	elem->size += priv_data_size;
+	priv->size = priv_data_size;
+	memcpy(priv->data, ref->data->data, priv_data_size);
 	return 0;
 }
 
