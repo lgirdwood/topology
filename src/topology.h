@@ -24,6 +24,7 @@
 #include <sys/stat.h>
 #include <dlfcn.h>
 #include <dirent.h>
+#include <limits.h>
 
 #include <linux/types.h>
 #include <sound/asound.h>
