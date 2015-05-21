@@ -120,7 +120,6 @@ struct soc_tplg_elem {
 
 	/* storage for textsand data if this is text or data elem*/
 	char texts[SND_SOC_TPLG_NUM_TEXTS][SNDRV_CTL_ELEM_ID_NAME_MAXLEN];
-	unsigned int values[SND_SOC_TPLG_NUM_TEXTS * SNDRV_CTL_ELEM_ID_NAME_MAXLEN / 4];
 	
 	int index;
 	enum parser_type type;
@@ -142,7 +141,6 @@ struct soc_tplg_elem {
 
 		/* these do not map to UAPI structs but are internal only */
 		struct snd_soc_tplg_ctl_tlv *tlv;
-		struct snd_soc_tplg_text *text;
 		struct snd_soc_tplg_private *data;
 	};
 
