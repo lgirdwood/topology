@@ -389,6 +389,141 @@ __err:
 	return err;
 }
 
+static void dump_priv_data(struct soc_tplg_elem *elem)
+{
+	struct snd_soc_tplg_private *priv = elem->data;
+	unsigned char *p = (unsigned char *)priv->data;
+	int i, j = 0;
+
+	tplg_dbg(" elem size = %d, priv data size = %d\n", elem->size, priv->size);
+
+	for (i = 0; i < priv->size; i++) {
+		if (j++ % 8 == 0)
+			tplg_dbg("\n");
+
+		tplg_dbg(" 0x%x", *p++);
+	}
+
+	tplg_dbg("\n\n");
+}
+
+static int get_hex_num(const char *str)
+{
+	char *tmp, *s = NULL;
+	int i = 0;
+
+	tmp = strdup(str);
+	if (tmp == NULL)
+		return -ENOMEM;
+
+	s = strtok(tmp, ",");
+	while (s != NULL) {
+		s = strtok(NULL, ",");
+		i++;
+	}
+
+	free(tmp);
+	return i;
+}
+
+static int write_hex(char *buf, char *str, int width)
+{
+	long val;
+	void *p = &val;
+	
+        errno = 0;
+	val = strtol(str, NULL, 16);
+
+	if ((errno == ERANGE && (val == LONG_MAX || val == LONG_MIN))
+		|| (errno != 0 && val == 0)) {
+		return -EINVAL;
+        }
+
+	switch (width) {
+	case 1:
+		*(unsigned char *)buf = *(unsigned char *)p;
+		break;
+	case 2:
+		*(unsigned short *)buf = *(unsigned short *)p;
+		break;
+	case 4:
+		*(unsigned int *)buf = *(unsigned int *)p;
+		break;
+	default:
+		return -EINVAL;
+	}
+	
+	return 0;
+}
+
+static int copy_data_hex(char *data, int off, const char *str, int width)
+{
+	char *tmp, *s = NULL, *p = data;
+	int ret;
+
+	tmp = strdup(str);
+	if (tmp == NULL)
+		return -ENOMEM;
+
+	p += off;
+	s = strtok(tmp, ",");
+
+	while (s != NULL) {
+		ret = write_hex(p, s, width);
+		if (ret < 0) {
+			free(tmp);
+			return ret;
+		}
+
+		s = strtok(NULL, ",");
+		p += width;
+	}
+
+	free(tmp);
+	return 0;
+}
+
+static int parse_data_hex(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg,
+	struct soc_tplg_elem *elem, int width)
+{
+	struct snd_soc_tplg_private *priv;
+	const char *value = NULL;
+	int size, esize, off, num;
+	int ret;
+
+	tplg_dbg(" data: %s\n", elem->id);
+
+	if (snd_config_get_string(cfg, &value) < 0)
+		return -EINVAL;
+
+	num = get_hex_num(value);
+	size = num * width;
+	priv = elem->data;
+
+	if (priv != NULL) {
+		off = priv->size;
+		esize = elem->size + size;
+		priv = realloc(priv, esize);
+	} else {
+		off = 0;
+		esize = sizeof(*priv) + size;
+		priv = calloc(1, esize);
+	}
+
+	if (!priv)
+		return -ENOMEM;	
+	
+	elem->data = priv;
+	priv->size += size;
+	elem->size = esize;
+
+	ret = copy_data_hex(priv->data, off, value, width);
+	
+	dump_priv_data(elem);
+	return ret;
+}
+
+
 /* Parse Private data.
  *
  * Object private data
@@ -498,140 +633,6 @@ static int parse_text_values(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg,
 	}
 
 	return 0;
-}
-
-static int get_hex_num(const char *str)
-{
-	char *tmp, *s = NULL;
-	int i = 0;
-
-	tmp = strdup(str);
-	if (tmp == NULL)
-		return -ENOMEM;
-
-	s = strtok(tmp, ",");
-	while (s != NULL) {
-		s = strtok(NULL, ",");
-		i++;
-	}
-
-	free(tmp);
-	return i;
-}
-
-static int write_hex(char *buf, char *str, int width)
-{
-	long val;
-	void *p = &val;
-	
-        errno = 0;
-	val = strtol(str, NULL, 16);
-
-	if ((errno == ERANGE && (val == LONG_MAX || val == LONG_MIN))
-		|| (errno != 0 && val == 0)) {
-		return -EINVAL;
-        }
-
-	switch (width) {
-	case 1:
-		*(unsigned char *)buf = *(unsigned char *)p;
-		break;
-	case 2:
-		*(unsigned short *)buf = *(unsigned short *)p;
-		break;
-	case 4:
-		*(unsigned int *)buf = *(unsigned int *)p;
-		break;
-	default:
-		return -EINVAL;
-	}
-	
-	return 0;
-}
-
-static int copy_data_hex(char *data, int off, const char *str, int width)
-{
-	char *tmp, *s = NULL, *p = data;
-	int ret;
-
-	tmp = strdup(str);
-	if (tmp == NULL)
-		return -ENOMEM;
-
-	p += off;
-	s = strtok(tmp, ",");
-
-	while (s != NULL) {
-		ret = write_hex(p, s, width);
-		if (ret < 0) {
-			free(tmp);
-			return ret;
-		}
-
-		s = strtok(NULL, ",");
-		p += width;
-	}
-
-	free(tmp);
-	return 0;
-}
-
-static void dump_priv_data(struct soc_tplg_elem *elem)
-{
-	struct snd_soc_tplg_private *priv = elem->data;
-	unsigned char *p = (unsigned char *)priv->data;
-	int i, j = 0;
-
-	tplg_dbg(" elem size = %d, priv data size = %d\n", elem->size, priv->size);
-
-	for (i = 0; i < priv->size; i++) {
-		if (j++ % 8 == 0)
-			tplg_dbg("\n");
-
-		tplg_dbg(" 0x%x", *p++);
-	}
-
-	tplg_dbg("\n\n");
-}
-
-static int parse_data_hex(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg,
-	struct soc_tplg_elem *elem, int width)
-{
-	struct snd_soc_tplg_private *priv;
-	const char *value = NULL;
-	int size, esize, off, num;
-	int ret;
-
-	tplg_dbg(" data: %s\n", elem->id);
-
-	if (snd_config_get_string(cfg, &value) < 0)
-		return -EINVAL;
-
-	num = get_hex_num(value);
-	size = num * width;
-	priv = elem->data;
-
-	if (priv != NULL) {
-		off = priv->size;
-		esize = elem->size + size;
-		priv = realloc(priv, esize);
-	} else {
-		off = 0;
-		esize = sizeof(*priv) + size;
-		priv = calloc(1, esize);
-	}
-
-	if (!priv)
-		return -ENOMEM;	
-	
-	elem->data = priv;
-	priv->size += size;
-	elem->size = esize;
-
-	ret = copy_data_hex(priv->data, off, value, width);
-	
-	dump_priv_data(elem);
-	return ret;
 }
 
 /* Parse Private data.
