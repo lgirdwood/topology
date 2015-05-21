@@ -170,8 +170,12 @@ static void elem_free(struct soc_tplg_elem *elem)
 {
 	//printf("free element %s\n", elem->id);
 	free_ref_list(&elem->ref_list);
-	/* TODO: some element type like private_data also needs to free private
-	  * pointer. Define a private free callback for struct struct soc_tplg_elem? */
+
+	/* free struct snd_soc_tplg_ object,
+	 * the union pointers share the same address
+	 */
+	if(elem->mixer_ctrl)
+		free(elem->mixer_ctrl);
 
 	free(elem);
 }
