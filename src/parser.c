@@ -329,29 +329,60 @@ static int lookup_ops(const char *c)
 	return atoi(c);
 }
 
+
+/* Get Private data from a file. */
 static int parse_data_file(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg,
 	struct soc_tplg_elem *elem)
 {
-	struct snd_soc_tplg_private *priv;
+	struct snd_soc_tplg_private *priv = NULL;
 	const char *value = NULL;
+	FILE *fp;
+	int size;
+	size_t bytes_read;
+	int err = 0;
 
-	tplg_dbg(" data DataFile: %s\n", elem->id);
+	tplg_dbg("data DataFile: %s\n", elem->id);
 
 	if (snd_config_get_string(cfg, &value) < 0)
 		return -EINVAL;
 
-	priv = calloc(1, sizeof(*priv) + PATH_MAX);
-	if (!priv)
-		return -ENOMEM;	
-	
+	fp = fopen(value, "r");
+	if (fp == NULL) {
+		tplg_error("Invalid Data file path '%s'\n", value);
+		err = -errno;
+		goto __err;
+	}
+
+	fseek(fp, 0L, SEEK_END);
+	size = ftell(fp);
+	fseek(fp, 0L, SEEK_SET);
+	if (size <= 0) {
+		tplg_error("Invalid Data file size %d\n", size);
+		err = -EINVAL;
+		goto __err;
+	}
+
+	priv = calloc(1, sizeof(*priv) + size);
+	if (!priv) {
+		err = -ENOMEM;
+		goto __err;
+	}
+
+	bytes_read = fread(&priv->data, 1, size, fp);
+	if (bytes_read != size) {
+		err = -errno;
+		goto __err;
+	}
+
 	elem->data = priv;
-	priv->size = PATH_MAX;
-	elem->size = sizeof(*priv) + priv->size;
-
-	strncpy(priv->data, value, PATH_MAX);
-	tplg_dbg("\t%s\n", priv->data);
-
+	priv->size = size;
+	elem->size = sizeof(*priv) + size;
 	return 0;
+
+__err:
+	if (priv)
+		free(priv);
+	return err;
 }
 
 /* Parse Private data.
