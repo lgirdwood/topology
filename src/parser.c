@@ -949,6 +949,7 @@ static int parse_tlv(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg,
  *	base "0"
  *	num_regs "16"
  *	mask "0xff"
+ *	max "255"
  * }
  */
 static int parse_control_bytes(struct soc_tplg_priv *soc_tplg,
@@ -1017,6 +1018,15 @@ static int parse_control_bytes(struct soc_tplg_priv *soc_tplg,
 				return -EINVAL;
 
 			be->num_regs = atoi(val);
+			tplg_dbg("\t%s: %d\n", id, be->num_regs);
+			continue;
+		}
+
+		if (strcmp(id, "max") == 0) {
+			if (snd_config_get_string(n, &val) < 0)
+				return -EINVAL;
+
+			be->max = atoi(val);
 			tplg_dbg("\t%s: %d\n", id, be->num_regs);
 			continue;
 		}
