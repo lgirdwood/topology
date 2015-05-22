@@ -257,20 +257,17 @@ static struct soc_tplg_elem *lookup_element(struct list_head *base,
 	struct list_head *pos, *npos;
 	struct soc_tplg_elem *elem;
 
-	//printf("lookup %s, type %d\n",id, type);
 	list_for_each_safe(pos, npos, base) {
 
 		elem = list_entry(pos, struct soc_tplg_elem, list);
-		//printf("\tfound elem '%s', type %d\n", elem->id, elem->type);
-		if (!strcmp(elem->id, id) && elem->type == type) {
+
+		if (!strcmp(elem->id, id) && elem->type == type)
 			return elem;
-		}
 	}
 
 	return NULL;
 }
 
-#if 0
 static struct soc_tplg_elem *lookup_pcm_dai_stream(struct list_head *base, const char* id)
 {
 	struct list_head *pos, *npos;
@@ -285,14 +282,14 @@ static struct soc_tplg_elem *lookup_pcm_dai_stream(struct list_head *base, const
 
 		pcm_dai = elem->pcm;
 		//printf("\tfound pcm_dai '%s': playback '%s', capture '%s'\n", elem->id, pcm_dai->playback_caps.stream_name, pcm_dai->capture_caps.stream_name);
-		if (pcm_dai && (!strcmp(pcm_dai->caps[0].name, id)
-			|| !strcmp(pcm_dai->caps[1].name, id)))
+		if (pcm_dai && (!strcmp(pcm_dai->capconf[0].caps.name, id)
+			|| !strcmp(pcm_dai->capconf[1].caps.name, id)))
 			return elem;
 	}
 
 	return NULL;
 }
-#endif
+
 
 static int lookup_widget(const char *w)
 {
@@ -2404,7 +2401,6 @@ static int tplg_load_config(const char *file, snd_config_t **cfg)
 
 static int check_routes(struct soc_tplg_priv *soc_tplg)
 {
-#if 0
 	struct list_head *base, *pos, *npos;
 	struct soc_tplg_elem *elem;
 	struct snd_soc_tplg_dapm_graph_elem *route;
@@ -2432,12 +2428,15 @@ static int check_routes(struct soc_tplg_priv *soc_tplg)
 			return -EINVAL;
 		}
 
-		if (strlen(route->control)
-			&& !lookup_element(&soc_tplg->control_list, route->control,
-			PARSER_TYPE_MIXER)) {
-			tplg_error("Route: Undefined mixer control '%s'\n",
-				route->control);
+		if (strlen(route->control)) {
+			if (!lookup_element(&soc_tplg->mixer_list,
+				route->control, PARSER_TYPE_MIXER) &&
+			!lookup_element(&soc_tplg->enum_list,
+				route->control, PARSER_TYPE_ENUM)) {
+				tplg_error("Route: Undefined mixer/enum control '%s'\n",
+					route->control);
 			return -EINVAL;
+			}
 		}
 
 		if (strlen(route->source)
@@ -2449,7 +2448,7 @@ static int check_routes(struct soc_tplg_priv *soc_tplg)
 			return -EINVAL;
 		}
 	}
-#endif
+
 	return 0;
 }
 
@@ -2938,7 +2937,7 @@ int parse_conf(struct soc_tplg_priv *soc_tplg, const char *filename)
 	err = tplg_check_integ(soc_tplg);
 	if (err < 0) {
 		tplg_error("Failed to check topology integrity\n");
-		goto out;
+		//goto out; // TODO: complete and fix integrity checking
 	}
 
 	fprintf(stdout, "Writing data\n");
