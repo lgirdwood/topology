@@ -129,6 +129,7 @@ struct soc_tplg_elem {
 
 	/* UAPI object for this elem */
 	union {
+		void *obj;
 		struct snd_soc_tplg_mixer_control *mixer_ctrl;
 		struct snd_soc_tplg_enum_control *enum_ctrl;
 		struct snd_soc_tplg_bytes_control *bytes_ext;

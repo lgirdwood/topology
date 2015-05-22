@@ -76,8 +76,8 @@ static int write_block_header(struct soc_tplg_priv *soc_tplg, u32 type,
 	return bytes;
 }
 
-static int write_mixer_block(struct soc_tplg_priv *soc_tplg,
-	struct list_head *base, int size)
+static int write_elem_block(struct soc_tplg_priv *soc_tplg,
+	struct list_head *base, int size, int tplg_type, const char *obj_name)
 {
 	struct list_head *pos, *npos;
 	struct soc_tplg_elem *elem;
@@ -88,23 +88,30 @@ static int write_mixer_block(struct soc_tplg_priv *soc_tplg,
 		count++;
 
 	/* write the header for this block */
-	ret = write_block_header(soc_tplg, SND_SOC_TPLG_TYPE_MIXER, 0,
+	ret = write_block_header(soc_tplg, tplg_type, 0,
 		SND_SOC_TPLG_ABI_VERSION, 0, size, count);
 	if (ret < 0) {
-		tplg_error("error: failed to write mixer block %d\n", ret);
+		tplg_error("error: failed to write %s block %d\n",
+			obj_name, ret);
 		return ret;
 	}
 
-	/* write each mixer control from block */
+	/* write each elem to block */
 	list_for_each_safe(pos, npos, base) {
 
 		elem = list_entry(pos, struct soc_tplg_elem, list);
-		verbose(soc_tplg, " mixer '%s': write %d bytes\n",
-			elem->id, elem->size);
 
-		count = write(soc_tplg->out_fd, elem->mixer_ctrl, elem->size);
+		if (elem->type != PARSER_TYPE_DAPM_GRAPH)
+			verbose(soc_tplg, " %s '%s': write %d bytes\n",
+				obj_name, elem->id, elem->size);
+		else
+			verbose(soc_tplg, " %s '%s': write %d bytes\n",
+				obj_name, elem->route->source, elem->size);
+
+		count = write(soc_tplg->out_fd, elem->obj, elem->size);
 		if (count < 0) {		
-			tplg_error("error: failed to write mixer %d\n", ret);
+			tplg_error("error: failed to write %s %d\n",
+				obj_name, ret);
 			return ret;		
 		}
 
@@ -120,426 +127,18 @@ static int write_mixer_block(struct soc_tplg_priv *soc_tplg,
 
 	return 0;
 }
-
-/* write the enum control list */
-static int write_enum_block(struct soc_tplg_priv *soc_tplg,
-	struct list_head *base, int size)
-{
-	struct list_head *pos, *npos;
-	struct soc_tplg_elem *elem;
-	int ret, wsize = 0, count = 0;
-
-	/* count number of elements */
-	list_for_each_safe(pos, npos, base)
-		count++;
-
-	/* write the header for this block */
-	ret = write_block_header(soc_tplg, SND_SOC_TPLG_TYPE_ENUM, 0,
-		SND_SOC_TPLG_ABI_VERSION, 0, size, count);
-	if (ret < 0) {
-		tplg_error("error: failed to write enum control block %d\n", ret);
-		return ret;
-	}
-
-	/* write each enum control from block */
-	list_for_each_safe(pos, npos, base) {
-
-		elem = list_entry(pos, struct soc_tplg_elem, list);
-		verbose(soc_tplg, " enum '%s': write %d bytes\n",
-			elem->id, elem->size);
-
-		count = write(soc_tplg->out_fd, elem->enum_ctrl, elem->size);
-		if (count < 0) {
-			tplg_error("error: failed to write enum %d\n", ret);
-			return ret;
-		}
-
-		wsize += count;
-	}
-
-	/* make sure we have written the correct size */
-	if (wsize != size) {
-		tplg_error("error: size mismatch. Expected %d wrote %d\n",
-			size, wsize);
-		return -EIO;
-	}
-
-	return 0;
-}
-
-/* write the byte extended control list */
-static int write_bytes_extended_block(struct soc_tplg_priv *soc_tplg,
-	struct list_head *base, int size)
-{
-	struct list_head *pos, *npos;
-	struct soc_tplg_elem *elem;
-	int ret, wsize = 0, count = 0;
-
-	/* count number of elements */
-	list_for_each_safe(pos, npos, base)
-		count++;
-
-	/* write the header for this block */
-	ret = write_block_header(soc_tplg, SND_SOC_TPLG_TYPE_BYTES, 0,
-		SND_SOC_TPLG_ABI_VERSION, 0, size, count);
-	if (ret < 0) {
-		tplg_error("error: failed to write bytes extended block %d\n", ret);
-		return ret;
-	}
-
-	/* write each bytes extended control from block */
-	list_for_each_safe(pos, npos, base) {
-
-		elem = list_entry(pos, struct soc_tplg_elem, list);
-		verbose(soc_tplg, " bytes ext '%s': write %d bytes\n",
-			elem->id, elem->size);
-
-		count = write(soc_tplg->out_fd, elem->bytes_ext, elem->size);
-		if (count < 0) {
-			tplg_error("error: failed to write bytes ext %d\n", ret);
-			return ret;
-		}
-
-		wsize += count;
-	}
-
-	/* make sure we have written the correct size */
-	if (wsize != size) {
-		tplg_error("error: size mismatch. Expected %d wrote %d\n",
-			size, wsize);
-		return -EIO;
-	}
-
-	return 0;
-}
-
-static int write_graph_block(struct soc_tplg_priv *soc_tplg,
-	struct list_head *base, int size)
-{
-	struct list_head *pos, *npos;
-	struct soc_tplg_elem *elem;
-	int ret, wsize = 0, count = 0;
-
-	/* count number of elements */
-	list_for_each_safe(pos, npos, base)
-		count++;
-
-	/* write the header for this block */
-	ret = write_block_header(soc_tplg, SND_SOC_TPLG_TYPE_DAPM_GRAPH, 0,
-		SND_SOC_TPLG_ABI_VERSION, 0, size, count);
-	if (ret < 0) {
-		tplg_error("failed to write control elems %d\n", ret);
-		return ret;
-	}
-
-	/* write each mixer control from block */
-	list_for_each_safe(pos, npos, base) {
-
-		elem = list_entry(pos, struct soc_tplg_elem, list);
-		verbose(soc_tplg, " route '%s': start to write %d bytes\n",
-			elem->route->source, elem->size);
-
-		count = write(soc_tplg->out_fd, elem->route, elem->size);
-		if (count < 0) {		
-			tplg_error("error: failed to write grpah %d\n", ret);
-			return ret;		
-		}
-
-		wsize += count;
-	}
-
-	/* make sure we have written the correct size */
-	if (wsize != size) {
-		tplg_error("error: size mismatch. Expected %d wrote %d\n",
-			size, wsize);
-		return -EIO;
-	}
-
-	return 0;
-}
-
-static int write_widget_block(struct soc_tplg_priv *soc_tplg,
-	struct list_head *base, int size)
-{
-	struct list_head *pos, *npos;
-	struct soc_tplg_elem *elem;
-	int ret, wsize = 0, count = 0;
-
-	/* count number of elements */
-	list_for_each_safe(pos, npos, base)
-		count++;
-
-	/* write the header for this block */
-	ret = write_block_header(soc_tplg, SND_SOC_TPLG_TYPE_DAPM_WIDGET, 0,
-		SND_SOC_TPLG_ABI_VERSION, 0, size, count);
-	if (ret < 0) {
-		tplg_error("failed to write control elems %d\n", ret);
-		return ret;
-	}
-
-	/* write each mixer control from block */
-	list_for_each_safe(pos, npos, base) {
-
-		elem = list_entry(pos, struct soc_tplg_elem, list);
-		verbose(soc_tplg, " widget '%s': start to write %d bytes\n",
-			elem->id, elem->size);
-
-		count = write(soc_tplg->out_fd, elem->widget, elem->size);
-		if (count < 0) {		
-			tplg_error("error: failed to write widget %s %d\n",
-				elem->id, ret);
-			return ret;		
-		}
-
-		wsize += count;
-	}
-
-	/* make sure we have written the correct size */
-	if (wsize != size) {
-		tplg_error("error: size mismatch. Expected %d wrote %d\n",
-			size, wsize);
-		return -EIO;
-	}
-
-	return 0;
-}
-
-static int write_pcm_block(struct soc_tplg_priv *soc_tplg,
-	struct list_head *base, int size)
-{
-	struct list_head *pos, *npos;
-	struct soc_tplg_elem *elem;
-	int ret, wsize = 0, count = 0;
-
-	/* count number of elements */
-	list_for_each_safe(pos, npos, base)
-		count++;
-
-	/* write the header for this block */
-	ret = write_block_header(soc_tplg, SND_SOC_TPLG_TYPE_PCM, 0,
-		SND_SOC_TPLG_ABI_VERSION, 0, size, count);
-	if (ret < 0) {
-		tplg_error("failed to write pcm elems %d\n", ret);
-		return ret;
-	}
-
-	/* write each pcm from block */
-	list_for_each_safe(pos, npos, base) {
-
-		elem = list_entry(pos, struct soc_tplg_elem, list);
-		verbose(soc_tplg, " pcm '%s': start to write %d bytes\n",
-			elem->id, elem->size);
-
-		count = write(soc_tplg->out_fd, elem->pcm, elem->size);
-		if (count < 0) {		
-			tplg_error("error: failed to write pcm %s %d\n",
-				elem->id, ret);
-			return ret;		
-		}
-
-		wsize += count;
-	}
-
-	/* make sure we have written the correct size */
-	if (wsize != size) {
-		tplg_error("error: size mismatch. Expected %d wrote %d\n",
-			size, wsize);
-		return -EIO;
-	}
-
-	return 0;
-}
-
-static int write_be_block(struct soc_tplg_priv *soc_tplg,
-	struct list_head *base, int size)
-{
-	struct list_head *pos, *npos;
-	struct soc_tplg_elem *elem;
-	int ret, wsize = 0, count = 0;
-
-	/* count number of elements */
-	list_for_each_safe(pos, npos, base)
-		count++;
-
-	/* jinyao: write SND_SOC_TPLG_TYPE_DAI_LINK correct? */
-	ret = write_block_header(soc_tplg, SND_SOC_TPLG_TYPE_DAI_LINK, 0,
-		SND_SOC_TPLG_ABI_VERSION, 0, size, count);
-	if (ret < 0) {
-		tplg_error("failed to write be elems %d\n", ret);
-		return ret;
-	}
-
-	/* write each be from block */
-	list_for_each_safe(pos, npos, base) {
-
-		elem = list_entry(pos, struct soc_tplg_elem, list);
-		verbose(soc_tplg, " be '%s': start to write %d bytes\n",
-			elem->id, elem->size);
-
-		count = write(soc_tplg->out_fd, elem->be, elem->size);
-		if (count < 0) {		
-			tplg_error("error: failed to write be %s %d\n",
-				elem->id, ret);
-			return ret;		
-		}
-
-		wsize += count;
-	}
-
-	/* make sure we have written the correct size */
-	if (wsize != size) {
-		tplg_error("error: size mismatch. Expected %d wrote %d\n",
-			size, wsize);
-		return -EIO;
-	}
-
-	return 0;
-}
-
-static int write_cc_block(struct soc_tplg_priv *soc_tplg,
-	struct list_head *base, int size)
-{
-	struct list_head *pos, *npos;
-	struct soc_tplg_elem *elem;
-	int ret, wsize = 0, count = 0;
-
-	/* count number of elements */
-	list_for_each_safe(pos, npos, base)
-		count++;
-
-	/* jinyao: write SND_SOC_TPLG_TYPE_DAI_LINK correct? */
-	ret = write_block_header(soc_tplg, SND_SOC_TPLG_TYPE_DAI_LINK, 0,
-		SND_SOC_TPLG_ABI_VERSION, 0, size, count);
-	if (ret < 0) {
-		tplg_error("failed to write cc elems %d\n", ret);
-		return ret;
-	}
-
-	/* write each cc from block */
-	list_for_each_safe(pos, npos, base) {
-
-		elem = list_entry(pos, struct soc_tplg_elem, list);
-		verbose(soc_tplg, " cc '%s': start to write %d bytes\n",
-			elem->id, elem->size);
-
-		count = write(soc_tplg->out_fd, elem->cc, elem->size);
-		if (count < 0) {		
-			tplg_error("error: failed to write cc %s %d\n",
-				elem->id, ret);
-			return ret;		
-		}
-
-		wsize += count;
-	}
-
-	/* make sure we have written the correct size */
-	if (wsize != size) {
-		tplg_error("error: size mismatch. Expected %d wrote %d\n",
-			size, wsize);
-		return -EIO;
-	}
-
-	return 0;
-}
-
-#if 0
-static struct soc_tplg_elem *lookup_element(struct list_head *base,
-				const char* id,
-				u32 type)
-{
-	struct list_head *pos, *npos;
-	struct soc_tplg_elem *elem;
-
-	list_for_each_safe(pos, npos, base) {
-
-		elem = list_entry(pos, struct soc_tplg_elem, list);
-		if (!strcmp(elem->id, id) && elem->type == type) {
-			return elem;
-		}
-	}
-
-	return NULL;
-}
-
-static int calc_refelem_size(struct soc_tplg_priv *soc_tplg,
-	struct soc_tplg_elem *elem)
-{
-	struct soc_tplg_ref *ref;
-	struct list_head *base, *pos, *npos;
-	struct soc_tplg_elem *ref_elem;
-	int size = 0;
-
-	/*
-	 * Currently only widget could be appended with other controls.
-	 * For the widget, we should calc the ref elem's object size.
-	 *
-	 * File block representation for DAPM widget :-
-	 * +-------------------------------------+-----+
-	 * | struct snd_soc_tplg_hdr             |  1  |
-	 * +-------------------------------------+-----+
-	 * | struct snd_soc_tplg_dapm_widget     |  N  |
-	 * +-------------------------------------+-----+
-	 * |   struct snd_soc_tplg_enum_control  | 0|1 |
-	 * |   struct snd_soc_tplg_mixer_control | 0|N |
-	 * +-------------------------------------+-----+
-	 */
-	if (elem->type != PARSER_TYPE_DAPM_WIDGET)
-		return 0;
-
-	tplg_dbg(" add %s references\n", elem->id);
-
-	base = &elem->ref_list;
-	list_for_each_safe(pos, npos, base) {
-
-		ref = list_entry(pos, struct soc_tplg_ref, list);
-		if ((ref->type == PARSER_TYPE_ENUM) ||
-			(ref->type == PARSER_TYPE_MIXER)) {
-
-			ref_elem = lookup_element(&soc_tplg->control_list,
-				ref->id, ref->type);
-			if (ref_elem == NULL) {
-				tplg_error("error: cant find ref %s\n", ref->id);
-				return -EINVAL;
-			}
-
-			tplg_dbg(" size %5.5d add %s size %5.5d\n", size,
-				ref->elem->id, ref_elem->size);
-			size += ref_elem->size;
-		}
-	}
-
-	tplg_dbg(" ref size %d\n", size);
- 	return size;
-}
-#endif
 
 static int calc_block_size(struct soc_tplg_priv *soc_tplg,
 	struct list_head *base)
 {
 	struct list_head *pos, *npos;
 	struct soc_tplg_elem *elem;
-	int size = 0, refelem_size = 0;
+	int size = 0;
 
 	list_for_each_safe(pos, npos, base) {
 
 		elem = list_entry(pos, struct soc_tplg_elem, list);
-		//tplg_dbg("Block size at %s is %d\n", elem->id, size);
-
-		/*
-		 * For the elem (e.g. widget) which references other elems,
-		 * we should also calc the size of referenced elems because
-		 * the referenced elem's object would be appended to the
-		 * end of current elem (e.g. widget).
-		 */
-		//refelem_size = calc_refelem_size(soc_tplg, elem);
-		//if (refelem_size < 0)
-		//	return refelem_size;
-
-		/*
-		 * elem->size only indicates the object size (not include the 
-		 * elem structure itself)
-		 */
-		size += elem->size + refelem_size;
+		size += elem->size;
 	}
 
 	return size;
@@ -561,21 +160,37 @@ static int write_block(struct soc_tplg_priv *soc_tplg, struct list_head *base,
 	/* TODO: add all objects */
 	switch (type) {
 	case PARSER_TYPE_MIXER:
-		return write_mixer_block(soc_tplg, base, size);
+		return write_elem_block(soc_tplg, base, size,
+			SND_SOC_TPLG_TYPE_MIXER, "mixer");
+
 	case PARSER_TYPE_BYTES:
-		return write_bytes_extended_block(soc_tplg, base, size);
+		return write_elem_block(soc_tplg, base, size,
+			SND_SOC_TPLG_TYPE_BYTES, "bytes");
+
 	case PARSER_TYPE_ENUM:
-		return write_enum_block(soc_tplg, base, size);
+		return write_elem_block(soc_tplg, base, size,
+			SND_SOC_TPLG_TYPE_ENUM, "enum");
+
 	case PARSER_TYPE_DAPM_GRAPH:
-		return write_graph_block(soc_tplg, base, size);
+		return write_elem_block(soc_tplg, base, size,
+			SND_SOC_TPLG_TYPE_DAPM_GRAPH, "route");
+
 	case PARSER_TYPE_DAPM_WIDGET:
-		return write_widget_block(soc_tplg, base, size);
+		return write_elem_block(soc_tplg, base, size,
+			SND_SOC_TPLG_TYPE_DAPM_WIDGET, "widget");
+
 	case PARSER_TYPE_PCM:
-		return write_pcm_block(soc_tplg, base, size);
+		return write_elem_block(soc_tplg, base, size,
+			SND_SOC_TPLG_TYPE_PCM, "pcm");
+			
 	case PARSER_TYPE_BE:
-		return write_be_block(soc_tplg, base, size);
+		return write_elem_block(soc_tplg, base, size,
+			SND_SOC_TPLG_TYPE_DAI_LINK, "be");
+
 	case PARSER_TYPE_CC:
-		return write_cc_block(soc_tplg, base, size);
+		return write_elem_block(soc_tplg, base, size,
+			SND_SOC_TPLG_TYPE_DAI_LINK, "cc");
+
 	default:
 		return -EINVAL;
 	}
