@@ -148,7 +148,6 @@ static void free_ref_list(struct list_head *base)
 
 	list_for_each_safe(pos, npos, base) {
 		ref = list_entry(pos, struct soc_tplg_ref, list);
-		//printf("\tfree ref %s\n", ref->id);
 		list_del(&ref->list);
 		free(ref);
 	}
@@ -168,7 +167,6 @@ static struct soc_tplg_elem *elem_new(void)
 
 static void elem_free(struct soc_tplg_elem *elem)
 {
-	//printf("free element %s\n", elem->id);
 	free_ref_list(&elem->ref_list);
 
 	/* free struct snd_soc_tplg_ object,
