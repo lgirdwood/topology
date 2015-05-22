@@ -1867,9 +1867,8 @@ static int parse_pcm(struct soc_tplg_priv *soc_tplg,
 			if (snd_config_get_string(n, &val) < 0)
 				return -EINVAL;
 
-			/* No "index" defined in struct snd_soc_tplg_pcm_dai now */
-			/* pcm_dai->index = atoi(val); */
-			/* tplg_dbg("\t%s: %d\n", id, pcm_dai->index); */
+			elem->index = atoi(val);
+			tplg_dbg("\t%s: %d\n", id, elem->index);
 			continue;
 		}
 
@@ -1962,9 +1961,8 @@ static int parse_be(struct soc_tplg_priv *soc_tplg,
 			if (snd_config_get_string(n, &val) < 0)
 				return -EINVAL;
 
-			/* No "index" defined in struct snd_soc_tplg_pcm_dai now */
-			/* pcm_dai->index = atoi(val); */
-			/* tplg_dbg("\t%s: %d\n", id, pcm_dai->index); */
+			elem->index = atoi(val);
+			tplg_dbg("\t%s: %d\n", id, elem->index);
 			continue;
 		}
 
@@ -2063,9 +2061,8 @@ static int parse_cc(struct soc_tplg_priv *soc_tplg,
 			if (snd_config_get_string(n, &val) < 0)
 				return -EINVAL;
 
-			/* No "index" defined in struct snd_soc_tplg_pcm_dai now */
-			/* pcm_dai->index = atoi(val); */
-			/* tplg_dbg("\t%s: %d\n", id, pcm_dai->index); */
+			elem->index = atoi(val);
+			tplg_dbg("\t%s: %d\n", id, elem->index);
 			continue;
 		}
 
