@@ -2907,7 +2907,7 @@ int parse_conf(struct soc_tplg_priv *soc_tplg, const char *filename)
 	err = tplg_check_integ(soc_tplg);
 	if (err < 0) {
 		tplg_error("Failed to check topology integrity\n");
-		//goto out; // TODO: complete and fix integrity checking
+		goto out;
 	}
 
 	fprintf(stdout, "Writing data\n");
