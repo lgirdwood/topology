@@ -328,6 +328,99 @@ static int lookup_ops(const char *c)
 	return atoi(c);
 }
 
+static struct soc_tplg_elem* create_elem_common(struct soc_tplg_priv *soc_tplg,
+	snd_config_t *cfg, enum parser_type type)
+{
+	struct soc_tplg_elem *elem;
+	const char *id;
+	int obj_size = 0;
+	void *obj;
+
+	elem = elem_new();
+	if (!elem)
+		return NULL;
+
+	snd_config_get_id(cfg, &id);
+	strncpy(elem->id, id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
+
+	switch (type) {
+	case PARSER_TYPE_DATA:
+		list_add_tail(&elem->list, &soc_tplg->pdata_list);
+		break;
+		
+	case PARSER_TYPE_TEXT:
+		list_add_tail(&elem->list, &soc_tplg->text_list);
+		break;
+	
+	case PARSER_TYPE_TLV:
+		list_add_tail(&elem->list, &soc_tplg->tlv_list);
+		elem->size = sizeof(struct snd_soc_tplg_ctl_tlv);
+		break;
+
+	case PARSER_TYPE_BYTES:
+		list_add_tail(&elem->list, &soc_tplg->bytes_ext_list);
+		obj_size = sizeof(struct snd_soc_tplg_bytes_control);
+		break;
+
+	case PARSER_TYPE_ENUM:
+		list_add_tail(&elem->list, &soc_tplg->enum_list);
+		obj_size = sizeof(struct snd_soc_tplg_enum_control);
+		break;
+		
+	case SND_SOC_TPLG_TYPE_MIXER:
+		list_add_tail(&elem->list, &soc_tplg->mixer_list);
+		obj_size = sizeof(struct snd_soc_tplg_mixer_control);
+		break;
+		
+	case PARSER_TYPE_DAPM_WIDGET:
+		list_add_tail(&elem->list, &soc_tplg->widget_list);
+		obj_size = sizeof(struct snd_soc_tplg_dapm_widget);
+		break;
+		
+	case PARSER_TYPE_STREAM_CONFIG:
+		list_add_tail(&elem->list, &soc_tplg->pcm_config_list);
+		obj_size = sizeof(struct snd_soc_tplg_stream_config);
+		break;
+		
+	case PARSER_TYPE_STREAM_CAPS:
+		list_add_tail(&elem->list, &soc_tplg->pcm_caps_list);
+		obj_size = sizeof(struct snd_soc_tplg_stream_caps);
+		break;
+		
+	case PARSER_TYPE_PCM:
+		list_add_tail(&elem->list, &soc_tplg->pcm_list);
+		obj_size = sizeof(struct snd_soc_tplg_pcm_dai);
+		break;
+	
+	case PARSER_TYPE_BE:
+		list_add_tail(&elem->list, &soc_tplg->be_list);
+		obj_size = sizeof(struct snd_soc_tplg_pcm_dai);
+		break;
+		
+	case PARSER_TYPE_CC:
+		list_add_tail(&elem->list, &soc_tplg->cc_list);
+		obj_size = sizeof(struct snd_soc_tplg_pcm_dai);
+		break;
+		
+	default:
+		free(elem);
+		return NULL;
+	}
+
+	if (obj_size > 0) {
+		obj = calloc(1, obj_size);
+		if (obj == NULL) {
+			free(elem);
+			return NULL;
+		}
+		
+		elem->obj = obj;
+		elem->size = obj_size;
+	}
+
+	elem->type = type;
+	return elem;	
+}
 
 /* Get Private data from a file. */
 static int parse_data_file(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg,
@@ -540,15 +633,9 @@ static int parse_data(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg,
 	int err = 0;
 	struct soc_tplg_elem *elem;
 
-	elem = elem_new();
+	elem = create_elem_common(soc_tplg, cfg, PARSER_TYPE_DATA);
 	if (!elem)
 		return -ENOMEM;
-
-	list_add_tail(&elem->list, &soc_tplg->pdata_list);
-
-	snd_config_get_id(cfg, &id);
-	strncpy(elem->id, id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
-	elem->type = PARSER_TYPE_DATA;
 
 	snd_config_for_each(i, next, cfg) {
 
@@ -650,15 +737,9 @@ static int parse_text(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg,
 	int err = 0;
 	struct soc_tplg_elem *elem;
 
-	elem = elem_new();
+	elem = create_elem_common(soc_tplg, cfg, PARSER_TYPE_TEXT);
 	if (!elem)
 		return -ENOMEM;
-
-	list_add_tail(&elem->list, &soc_tplg->text_list);
-
-	snd_config_get_id(cfg, &id);
-	strncpy(elem->id, id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
-	elem->type = PARSER_TYPE_TEXT;
 
 	snd_config_for_each(i, next, cfg) {
 
@@ -901,17 +982,9 @@ static int parse_tlv(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg,
 	int err = 0;
 	struct soc_tplg_elem *elem;
 
-	elem = elem_new();
+	elem = create_elem_common(soc_tplg, cfg, PARSER_TYPE_TLV);
 	if (!elem)
 		return -ENOMEM;
-
-	list_add_tail(&elem->list, &soc_tplg->tlv_list);
-
-	snd_config_get_id(cfg, &id);
-
-	strncpy(elem->id, id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
-	elem->type = PARSER_TYPE_TLV;
-	elem->size = sizeof(struct snd_soc_tplg_ctl_tlv);
 
 	snd_config_for_each(i, next, cfg) {
 
@@ -956,24 +1029,12 @@ static int parse_control_bytes(struct soc_tplg_priv *soc_tplg,
 	snd_config_t *n;
 	const char *id, *val = NULL;	
 
-	elem = elem_new();
+	elem = create_elem_common(soc_tplg, cfg, PARSER_TYPE_BYTES);
 	if (!elem)
 		return -ENOMEM;
 
-	be = calloc(1, sizeof(*be));
-	if (!be) {
-		free(elem);
-		return -ENOMEM;
-	}
-
-	/* add new element to control list */
-	list_add_tail(&elem->list, &soc_tplg->bytes_ext_list);
-	snd_config_get_id(cfg, &id);
-	strncpy(elem->id, id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
-
-	elem->bytes_ext = be;
-	elem->type = PARSER_TYPE_BYTES;
-	elem->size = be->size = sizeof(struct snd_soc_tplg_bytes_control);
+	be = elem->bytes_ext;
+	be->size = elem->size;
 	strncpy(be->hdr.name, elem->id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
 	be->hdr.type =  SND_SOC_TPLG_TYPE_BYTES;
 	
@@ -1080,29 +1141,17 @@ static int parse_control_enum(struct soc_tplg_priv *soc_tplg, snd_config_t *cfg,
 	const char *id, *val = NULL;
 	int err;
 
-	elem = elem_new();
+	elem = create_elem_common(soc_tplg, cfg, PARSER_TYPE_ENUM);
 	if (!elem)
 		return -ENOMEM;
 
-	ec = calloc(1, sizeof(*ec));
-	if (!ec) {
-		free(elem);
-		return -ENOMEM;
-	}
-
-	/* add new element to control list */
-	list_add_tail(&elem->list, &soc_tplg->enum_list);
-	snd_config_get_id(cfg, &id);
-	strncpy(elem->id, id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
-
-	/* init new mixer */	
-	elem->enum_ctrl = ec;
-	elem->type = PARSER_TYPE_ENUM;
+	/* init new mixer */
+	ec = elem->enum_ctrl;
 	strncpy(ec->hdr.name, elem->id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);	
 	ec->hdr.access = SNDRV_CTL_ELEM_ACCESS_TLV_READ |
 		SNDRV_CTL_ELEM_ACCESS_READWRITE;
 	ec->hdr.type =  SND_SOC_TPLG_TYPE_ENUM;
-	elem->size = ec->size = sizeof(*ec);
+	ec->size = elem->size;
 
 	tplg_dbg(" Control Enum: %s\n", elem->id);
 
@@ -1197,29 +1246,17 @@ static int parse_control_mixer(struct soc_tplg_priv *soc_tplg,
 	const char *id, *val = NULL;
 	int err;
 
-	elem = elem_new();
+	elem = create_elem_common(soc_tplg, cfg, PARSER_TYPE_MIXER);
 	if (!elem)
 		return -ENOMEM;
 
-	mc = calloc(1, sizeof(*mc));
-	if (!mc) {
-		free(elem);
-		return -ENOMEM;
-	}
-
-	/* add new element to control list */
-	list_add_tail(&elem->list, &soc_tplg->mixer_list);
-	snd_config_get_id(cfg, &id);
-	strncpy(elem->id, id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
-
-	/* init new mixer */	
-	elem->mixer_ctrl = mc;
-	elem->type = PARSER_TYPE_MIXER;
+	/* init new mixer */
+	mc = elem->mixer_ctrl;
 	strncpy(mc->hdr.name, elem->id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);	
 	mc->hdr.access = SNDRV_CTL_ELEM_ACCESS_TLV_READ |
 		SNDRV_CTL_ELEM_ACCESS_READWRITE;
 	mc->hdr.type =  SND_SOC_TPLG_TYPE_MIXER;
-	elem->size = mc->size = sizeof(*mc);
+	mc->size = elem->size;
 
 	tplg_dbg(" Control Mixer: %s\n", elem->id);
 
@@ -1329,25 +1366,13 @@ static int parse_dapm_widget(struct soc_tplg_priv *soc_tplg,
 	const char *id, *val = NULL;
 	int widget_type, err;
 
-	elem = elem_new();
+	elem = create_elem_common(soc_tplg, cfg, PARSER_TYPE_DAPM_WIDGET);
 	if (!elem)
 		return -ENOMEM;
 
-	widget = calloc(1, sizeof(*widget));
-	if (!widget) {
-		free(elem);
-		return -ENOMEM;
-	}
-
-	/* add new element to widget list */
-	list_add_tail(&elem->list, &soc_tplg->widget_list);
-	snd_config_get_id(cfg, &id);
-	strncpy(elem->id, id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
-
-	elem->widget = widget;
-	elem->type = PARSER_TYPE_DAPM_WIDGET;
+	widget = elem->widget;
 	strncpy(widget->name, elem->id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
-	elem->size = widget->size = sizeof(*widget);
+	widget->size = elem->size;
 
 	tplg_dbg(" Widget: %s\n", elem->id);
 
@@ -1544,23 +1569,12 @@ static int parse_pcm_config(struct soc_tplg_priv *soc_tplg,
 	const char *id;
 	int err;
 
-	elem = elem_new();
+	elem = create_elem_common(soc_tplg, cfg, PARSER_TYPE_STREAM_CONFIG);
 	if (!elem)
 		return -ENOMEM;
 
-	sc = calloc(1, sizeof(*sc));
-	if (!sc) {
-		free(elem);
-		return -ENOMEM;
-	}
-
-	list_add_tail(&elem->list, &soc_tplg->pcm_config_list);
-	snd_config_get_id(cfg, &id);
-	strncpy(elem->id, id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
-
-	elem->stream_cfg = sc;
-	elem->type = PARSER_TYPE_STREAM_CONFIG;
-	sc->size = sizeof(*sc);
+	sc = elem->stream_cfg;
+	sc->size = elem->size;
 
 	tplg_dbg(" PCM Config: %s\n", elem->id);
 
@@ -1631,23 +1645,12 @@ static int parse_pcm_caps(struct soc_tplg_priv *soc_tplg,
 	char *s;
 	int err;
 
-	elem = elem_new();
+	elem = create_elem_common(soc_tplg, cfg, PARSER_TYPE_STREAM_CAPS);
 	if (!elem)
 		return -ENOMEM;
 
-	sc = calloc(1, sizeof(*sc));
-	if (!sc) {
-		free(elem);
-		return -ENOMEM;
-	}
-
-	list_add_tail(&elem->list, &soc_tplg->pcm_caps_list);
-	snd_config_get_id(cfg, &id);
-	strncpy(elem->id, id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
-
-	sc->size = sizeof(*sc);
-	elem->stream_caps = sc;
-	elem->type = PARSER_TYPE_STREAM_CAPS;
+	sc = elem->stream_caps;
+	sc->size = elem->size;
 	strncpy(sc->name, elem->id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
 
 	tplg_dbg(" PCM Capabilities: %s\n", elem->id);
@@ -1827,23 +1830,12 @@ static int parse_pcm(struct soc_tplg_priv *soc_tplg,
 	const char *id, *val = NULL;
 	int err;
 
-	elem = elem_new();
+	elem = create_elem_common(soc_tplg, cfg, PARSER_TYPE_PCM);
 	if (!elem)
 		return -ENOMEM;
 
-	pcm_dai = calloc(1, sizeof(*pcm_dai));
-	if (!pcm_dai) {
-		free(elem);
-		return -ENOMEM;
-	}
-
-	list_add_tail(&elem->list, &soc_tplg->pcm_list);
-	snd_config_get_id(cfg, &id);
-	strncpy(elem->id, id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
-
-	elem->pcm = pcm_dai;
-	elem->type = PARSER_TYPE_PCM;
-	elem->size = pcm_dai->size = sizeof(*pcm_dai);
+	pcm_dai = elem->pcm;
+	pcm_dai->size = elem->size;
 
 	tplg_dbg(" PCM: %s\n", elem->id);
 
@@ -1921,23 +1913,12 @@ static int parse_be(struct soc_tplg_priv *soc_tplg,
 	const char *id, *val = NULL;
 	int err;
 
-	elem = elem_new();
+	elem = create_elem_common(soc_tplg, cfg, PARSER_TYPE_BE);
 	if (!elem)
 		return -ENOMEM;
 
-	pcm_dai = calloc(1, sizeof(*pcm_dai));
-	if (!pcm_dai) {
-		free(elem);
-		return -ENOMEM;
-	}
-
-	list_add_tail(&elem->list, &soc_tplg->be_list);
-	snd_config_get_id(cfg, &id);
-	strncpy(elem->id, id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
-
-	elem->be = pcm_dai;
-	elem->type = PARSER_TYPE_BE;
-	elem->size = pcm_dai->size = sizeof(*pcm_dai);
+	pcm_dai = elem->be;
+	pcm_dai->size = elem->size;
 
 	tplg_dbg(" BE: %s\n", elem->id);
 
@@ -2021,23 +2002,12 @@ static int parse_cc(struct soc_tplg_priv *soc_tplg,
 	const char *id, *val = NULL;
 	int err;
 
-	elem = elem_new();
+	elem = create_elem_common(soc_tplg, cfg, PARSER_TYPE_CC);
 	if (!elem)
 		return -ENOMEM;
 
-	pcm_dai = calloc(1, sizeof(*pcm_dai));
-	if (!pcm_dai) {
-		free(elem);
-		return -ENOMEM;
-	}
-
-	list_add_tail(&elem->list, &soc_tplg->cc_list);
-	snd_config_get_id(cfg, &id);
-	strncpy(elem->id, id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
-
-	elem->cc = pcm_dai;
-	elem->type = PARSER_TYPE_CC;
-	elem->size = pcm_dai->size = sizeof(*pcm_dai);
+	pcm_dai = elem->cc;
+	pcm_dai->size = elem->size;
 
 	tplg_dbg(" CC: %s\n", elem->id);
 
