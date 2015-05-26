@@ -1920,6 +1920,7 @@ static int parse_be(struct soc_tplg_priv *soc_tplg,
 
 	pcm_dai = elem->be;
 	pcm_dai->size = elem->size;
+	strncpy(pcm_dai->name, elem->id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
 
 	tplg_dbg(" BE: %s\n", elem->id);
 
