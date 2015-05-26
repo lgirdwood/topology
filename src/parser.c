@@ -1836,6 +1836,7 @@ static int parse_pcm(struct soc_tplg_priv *soc_tplg,
 
 	pcm_dai = elem->pcm;
 	pcm_dai->size = elem->size;
+	strncpy(pcm_dai->name, elem->id, SNDRV_CTL_ELEM_ID_NAME_MAXLEN);
 
 	tplg_dbg(" PCM: %s\n", elem->id);
 
